@@ -40,11 +40,6 @@ def load_config() -> dict:
         "warehouse_id":      None,
         "catalog":           None,
         "schema":            None,
-        "procurement_table": None,
-        "warehouse_table":   None,
-        "lead_time_table":   None,
-        "logistics_table":   None,
-        "forecast_table":    None,
     }
 
 

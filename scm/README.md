@@ -130,7 +130,17 @@ scm/
 │   └── japan_map.py                # Leaflet日本地図
 │
 ├── notebooks/
-│   └── 00_full_setup.py            # Databricks全自動セットアップ
+│   ├── 00_setup_catalog.py         # カタログ/Volume/CSVコピーのみ (Pipeline前)
+│   └── 01_create_genie.py          # Genieスペース作成 (Pipeline後)
+│
+├── pipelines/                      # Lakeflow Declarative Pipeline
+│   ├── bronze.py                   # 15 Bronze tables (CSV → Delta)
+│   ├── silver.py                   # 15 Silver tables (cleansing + expectations)
+│   └── gold.py                     # 14 Gold tables (port of gold_builder.py)
+│
+├── databricks.yml                  # Databricks Asset Bundle ルート
+├── resources/
+│   └── scm_pipeline.yml            # Pipeline 定義 (serverless, triggered)
 │
 ├── data_generation/                # デモデータ生成 (Databricks不要)
 │   ├── constants.py
@@ -138,8 +148,6 @@ scm/
 │
 └── sample_data/                    # デモ用CSV (15ファイル)
 ```
-
-Python 25ファイル、全29ファイル (データ/git除く)。
 
 ---
 
@@ -160,14 +168,26 @@ Python 25ファイル、全29ファイル (データ/git除く)。
 
 ## 7. Databricksデプロイ
 
+Lakeflow Declarative Pipeline + Databricks Asset Bundle (DAB) ベース。
+
 ```
-GitHub → Git Folder → 00_full_setup.py (Run All) → Databricks App (Path: scm)
-環境変数: SCM_CATALOG=supply_chain_management, SCM_SCHEMA=main
+ 1. GitHub にコード push
+ 2. Databricks: Workspace > Git Folder で最新を Pull
+ 3. Databricks: notebooks/00_setup_catalog を Run All
+    → カタログ/スキーマ/Volume 作成, CSV コピー, config.json 雛形
+ 4. ローカル PC: `cd scm && databricks bundle deploy -t dev`
+    → Lakeflow Pipeline と関連リソースを UC にデプロイ
+ 5. Databricks: Workflows > Pipelines > scm_decision_support_pipeline を手動実行
+    → Bronze 15 / Silver 15 / Gold 14 テーブルと UC Lineage グラフを生成
+ 6. Databricks: notebooks/01_create_genie を Run All
+    → Genie スペース作成, config.json に warehouse_id と genie_space_id を書き込み
+ 7. Databricks: Compute > Apps > scm-decision-support を Redeploy
+    環境変数: SCM_CATALOG=supply_chain_management, SCM_SCHEMA=main
 ```
 
 ### Databricks不要ファイル
 - `data_generation/` — デモデータ生成用。Databricksでは不要
-- `sample_data/` — デモモード用。Databricksでは Unity Catalog Gold を参照
+- `sample_data/` — ローカル/デモモード用。本番は Unity Catalog Gold を参照
 
 ---
 

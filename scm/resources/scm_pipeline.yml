@@ -1,0 +1,38 @@
+# ─────────────────────────────────────────────────────────────
+# Lakeflow Declarative Pipeline — SCM Decision Support
+# ─────────────────────────────────────────────────────────────
+# Declares a serverless, triggered (manual) pipeline that materializes
+# the Bronze / Silver / Gold layers from three Python source files.
+#
+# Unity Catalog lineage is populated automatically because every
+# downstream table references its upstream via `dlt.read()` or the
+# `LIVE.` SQL prefix.
+# ─────────────────────────────────────────────────────────────
+resources:
+  pipelines:
+    scm_pipeline:
+      name: scm_decision_support_pipeline
+      # Unity Catalog target
+      catalog: ${var.catalog}
+      target:  ${var.schema}
+      # Compute
+      serverless: true
+      photon: true
+      # Triggered (manual) mode — user runs it from Workflows UI or CLI
+      continuous: false
+      development: true
+      # Source code — paths are relative to the bundle root (scm/)
+      libraries:
+        - file:
+            path: ../pipelines/bronze.py
+        - file:
+            path: ../pipelines/silver.py
+        - file:
+            path: ../pipelines/gold.py
+      # Runtime parameters read by the pipeline code via
+      #   spark.conf.get("scm.volume_path", ...)
+      configuration:
+        "scm.volume_path":          "/Volumes/${var.catalog}/${var.schema}/${var.volume_name}"
+        "scm.today_date":           "${var.today_date}"
+        "scm.projection_end_date":  "${var.projection_end_date}"
+        "scm.breach_cutoff_month":  "${var.breach_cutoff_month}"

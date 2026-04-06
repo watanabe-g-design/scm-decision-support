@@ -1,0 +1,57 @@
+# ─────────────────────────────────────────────────────────────
+# Databricks Asset Bundle (DAB) — SCM Decision Support
+# ─────────────────────────────────────────────────────────────
+# Deploys the Lakeflow Declarative Pipeline that builds 15 Bronze,
+# 15 Silver, and 14 Gold tables for the SCM demo app.
+#
+# Usage:
+#   # One-time: edit the workspace host below
+#   databricks bundle validate -t dev
+#   databricks bundle deploy   -t dev
+#   databricks bundle run scm_pipeline -t dev
+#
+# The pipeline itself is declared in resources/scm_pipeline.yml
+# ─────────────────────────────────────────────────────────────
+
+bundle:
+  name: scm_decision_support
+
+# ── Parameters exposed to all resource files ────────────────
+variables:
+  catalog:
+    description: Unity Catalog name where tables will be created
+    default: supply_chain_management
+  schema:
+    description: Schema (database) name inside the catalog
+    default: main
+  volume_name:
+    description: Volume where CSV source files are stored
+    default: scm_data
+  today_date:
+    description: "Demo reference date. All TODAY-based calculations use this value."
+    default: "2026-03-31"
+  projection_end_date:
+    description: End of the monthly balance projection window
+    default: "2026-11-01"
+  breach_cutoff_month:
+    description: "Upper bound (yyyy-MM) for items included in gold_inventory_policy_breach"
+    default: "2026-09"
+
+# ── Pull in all resource definitions (pipelines, jobs, ...) ─
+include:
+  - resources/*.yml
+
+# ── Deployment targets ─────────────────────────────────────
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      # CHANGE ME: set this to your Databricks workspace URL.
+      # Find it in the browser when you are logged in, e.g.
+      #   https://adb-1234567890123456.7.azuredatabricks.net
+      #   https://dbc-abcdef12-3456.cloud.databricks.com
+      host: https://CHANGE_ME.cloud.databricks.com
+    variables:
+      catalog: supply_chain_management
+      schema: main
