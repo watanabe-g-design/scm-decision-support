@@ -710,30 +710,40 @@ def gold_action_queue_daily():
     ),
     lt_actions AS (
       SELECT
-        DATE '{TODAY}', 'lt_escalation',
-        item_id, item_code, item_name,
-        'LT長期化', '発注タイミング前倒し検討',
-        3,
-        '',
-        CASE WHEN remark <> '' THEN remark ELSE escalation_reason END,
-        ROW_NUMBER() OVER (ORDER BY delta_vs_n3 DESC NULLS LAST)
+        DATE '{TODAY}'                                               AS snapshot_date,
+        'lt_escalation'                                               AS source,
+        item_id                                                       AS target_id,
+        item_code                                                     AS item_code,
+        item_name                                                     AS item_name,
+        'LT長期化'                                                     AS risk_type,
+        '発注タイミング前倒し検討'                                      AS recommended_action,
+        3                                                             AS urgency_rank,
+        ''                                                            AS due_date,
+        CASE WHEN remark <> '' THEN remark ELSE escalation_reason END AS rationale,
+        ROW_NUMBER() OVER (ORDER BY delta_vs_n3 DESC NULLS LAST)      AS rn
       FROM LIVE.gold_lt_escalation_items
     ),
     breach_actions AS (
       SELECT
-        DATE '{TODAY}', 'policy_breach',
-        item_id, item_code, product_name,
-        '在庫ZERO予測', '緊急補充検討',
-        2,
-        breach_date,
-        CONCAT('予測在庫', CAST(projected_stock AS STRING)),
+        DATE '{TODAY}'                                     AS snapshot_date,
+        'policy_breach'                                    AS source,
+        item_id                                            AS target_id,
+        item_code                                          AS item_code,
+        product_name                                       AS item_name,
+        '在庫ZERO予測'                                      AS risk_type,
+        '緊急補充検討'                                      AS recommended_action,
+        2                                                  AS urgency_rank,
+        CAST(breach_date AS STRING)                        AS due_date,
+        CONCAT('予測在庫', CAST(projected_stock AS STRING)) AS rationale,
         ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY breach_date) AS rn_item
       FROM LIVE.gold_inventory_policy_breach
       WHERE breach_type = 'ZERO'
     ),
     breach_dedup AS (
-      SELECT *,
-        ROW_NUMBER() OVER (ORDER BY breach_date) AS rn
+      SELECT
+        snapshot_date, source, target_id, item_code, item_name,
+        risk_type, recommended_action, urgency_rank, due_date, rationale,
+        ROW_NUMBER() OVER (ORDER BY due_date) AS rn
       FROM breach_actions
       WHERE rn_item = 1
     )
