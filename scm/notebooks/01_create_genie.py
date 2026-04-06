@@ -23,6 +23,10 @@ SCHEMA       = dbutils.widgets.get("schema")
 WAREHOUSE_ID = dbutils.widgets.get("warehouse_id").strip()
 VOLUME_PATH  = f"/Volumes/{CATALOG}/{SCHEMA}/scm_data"
 
+# HTTP path (/sql/1.0/warehouses/xxx) を貼り付けられた場合は末尾だけ抽出
+if "/" in WAREHOUSE_ID:
+    WAREHOUSE_ID = WAREHOUSE_ID.rstrip("/").rsplit("/", 1)[-1]
+
 if not WAREHOUSE_ID:
     dbutils.notebook.exit("❌ warehouse_id を入力してください (SQL Warehouses → Connection details → HTTP path の末尾)")
 
