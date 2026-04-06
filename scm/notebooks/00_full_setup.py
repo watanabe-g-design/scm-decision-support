@@ -137,15 +137,17 @@ if sample_data_path is None:
 print(f"  📁 CSVソース: {sample_data_path}")
 
 # ── ボリュームへコピー ──
+import shutil
+
 csv_dest = f"{VOLUME_PATH}/csv"
-dbutils.fs.mkdirs(csv_dest)
+os.makedirs(csv_dest, exist_ok=True)
 
 csv_files = [f for f in os.listdir(sample_data_path) if f.endswith(".csv")]
 for csv_file in sorted(csv_files):
-    src = f"file:{sample_data_path}/{csv_file}"
+    src = f"{sample_data_path}/{csv_file}"
     dst = f"{csv_dest}/{csv_file}"
-    dbutils.fs.cp(src, dst, recurse=False)
-    size_kb = os.path.getsize(f"{sample_data_path}/{csv_file}") / 1024
+    shutil.copyfile(src, dst)
+    size_kb = os.path.getsize(src) / 1024
     print(f"  📄 {csv_file:<30} → Volume ({size_kb:.1f} KB)")
 
 print(f"\n  ✅ {len(csv_files)} ファイルのコピー完了")
