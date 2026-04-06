@@ -1,0 +1,11 @@
+﻿supplier_id,supplier_name,country,region
+SUP001,Nextera Semiconductor,Netherlands,Europe
+SUP002,Sakura Electronics,Japan,Asia
+SUP003,Pacific Instruments,USA,Americas
+SUP004,Alpine Microelectronics,Switzerland,Europe
+SUP005,Vertex Technologies,Germany,Europe
+SUP006,Crossfield Semiconductor,USA,Americas
+SUP007,Hikari Semiconductor,Japan,Asia
+SUP008,Fuji Electronic Devices,Japan,Asia
+SUP009,Pinnacle Technology,USA,Americas
+SUP010,Bridgelink Connectivity,Switzerland,Europe

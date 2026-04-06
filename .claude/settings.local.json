@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import pandas, numpy, dateutil; print\\(''OK''\\)\")",
+      "Bash(python -c \":*)"
+    ]
+  }
+}
