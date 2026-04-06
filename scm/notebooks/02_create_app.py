@@ -7,6 +7,7 @@
 # MAGIC ## このノートブックの役割
 # MAGIC | ステップ | 内容 |
 # MAGIC |---------|------|
+# MAGIC | 0 | databricks-sdk を最新版にアップグレード (Apps API 対応版) |
 # MAGIC | 1 | Git Folder から `scm` サブディレクトリを App のソースとして登録 |
 # MAGIC | 2 | App `scm-decision-support` を作成 (存在する場合はスキップ) |
 # MAGIC | 3 | ソースコードを deploy |
@@ -18,6 +19,20 @@
 # MAGIC - `01_create_genie` が完了し、Genie スペースが存在する
 # MAGIC - このノートブックを Git Folder 経由で開いている (ローカルパスではなく Workspace パス)
 # MAGIC - 環境変数は `scm/app.yaml` に定義済み (SCM_CATALOG, SCM_SCHEMA)
+
+# COMMAND ----------
+# MAGIC %md ## ステップ 0/5: databricks-sdk をアップグレード
+# MAGIC
+# MAGIC クラスター既定の SDK には `databricks.sdk.service.apps` が含まれていない場合があるため、
+# MAGIC 最新版をインストールして Python を再起動します。
+
+# COMMAND ----------
+
+# MAGIC %pip install --quiet --upgrade "databricks-sdk>=0.40.0"
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
 
 # COMMAND ----------
 
