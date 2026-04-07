@@ -1,13 +1,7 @@
 command:
-  - "streamlit"
-  - "run"
-  - "app.py"
-  - "--server.port=${DATABRICKS_APP_PORT}"
-  - "--server.address=0.0.0.0"
-  - "--server.headless=true"
-  - "--server.enableCORS=false"
-  - "--server.enableXsrfProtection=false"
-  - "--browser.gatherUsageStats=false"
+  - "sh"
+  - "-c"
+  - "streamlit run app.py --server.port=$DATABRICKS_APP_PORT --server.address=0.0.0.0 --server.headless=true --server.enableCORS=false --server.enableXsrfProtection=false --browser.gatherUsageStats=false"
 
 env:
   - name: SCM_CATALOG
