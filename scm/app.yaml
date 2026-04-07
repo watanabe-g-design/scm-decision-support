@@ -15,4 +15,4 @@ env:
   # Genie Space ID — Genie 連携に使う (未設定なら Genie 機能はスキップ)
   # Genie space URL の末尾 (https://.../genie/rooms/<ここ>)
   - name: SCM_GENIE_SPACE_ID
-    value: ""
+    value: "01f1321bb85518ffa53d3c92bd30a598"
