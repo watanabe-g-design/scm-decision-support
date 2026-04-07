@@ -13,11 +13,26 @@ def _run_sql(sql):
     from databricks.sdk import WorkspaceClient
     cfg = load_config()
     w = WorkspaceClient()
-    res = w.statement_execution.execute_statement(statement=sql, warehouse_id=cfg["warehouse_id"], wait_timeout="30s")
+    res = w.statement_execution.execute_statement(
+        statement=sql,
+        warehouse_id=cfg["warehouse_id"],
+        wait_timeout="30s",
+    )
     if res.status.state.value != "SUCCEEDED":
         raise RuntimeError(f"SQL failed: {res.status.error}")
+
     cols = [c.name for c in res.manifest.schema.columns]
-    data = [[cell.str_value for cell in row.values] for row in (res.result.data_array or [])]
+    raw_rows = (res.result.data_array if res.result and res.result.data_array else []) or []
+
+    # Statement Execution API は INLINE 形式では data_array を list[list[str]] で返す。
+    # 旧バージョンの SDK では list[Row] で row.values を持つこともあるため両対応する。
+    data = []
+    for row in raw_rows:
+        if hasattr(row, "values"):
+            data.append([cell.str_value if hasattr(cell, "str_value") else cell for cell in row.values])
+        else:
+            data.append(list(row))
+
     return pd.DataFrame(data, columns=cols)
 
 
