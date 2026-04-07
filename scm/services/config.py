@@ -14,12 +14,34 @@ _LOCAL_PATH  = Path(__file__).parent.parent / "config.local.json"
 
 @lru_cache(maxsize=1)
 def load_config() -> dict:
-    catalog = os.environ.get("SCM_CATALOG", "")
-    schema  = os.environ.get("SCM_SCHEMA",  "")
+    """設定読み込み (優先度順):
+    1. 環境変数 (Databricks Apps の app.yaml で設定)
+    2. Volume 上の config.json (環境変数で足りない値を補う)
+    3. ローカル開発用 config.local.json
+    4. デモモード (CSVから読む)
+    """
+    catalog        = os.environ.get("SCM_CATALOG", "")
+    schema         = os.environ.get("SCM_SCHEMA",  "")
+    warehouse_id   = os.environ.get("SCM_WAREHOUSE_ID",   "").strip()
+    genie_space_id = os.environ.get("SCM_GENIE_SPACE_ID", "").strip()
+
+    # HTTP path をそのまま貼られていても末尾だけ抽出
+    if "/" in warehouse_id:
+        warehouse_id = warehouse_id.rstrip("/").rsplit("/", 1)[-1]
+    if "/" in genie_space_id:
+        genie_space_id = genie_space_id.rstrip("/").rsplit("/", 1)[-1]
 
     if catalog and schema:
-        # Databricks Apps では /Volumes/... を直接読める
-        # (古い /dbfs/Volumes/... は Apps コンテナに存在しないことがあるので両方試す)
+        cfg = {
+            "_source":        "env",
+            "catalog":        catalog,
+            "schema":         schema,
+            "warehouse_id":   warehouse_id or None,
+            "genie_space_id": genie_space_id or None,
+        }
+
+        # Volume の config.json があれば、env で未設定の項目だけ補完する
+        # (Apps コンテナで /Volumes/ が読めないこともあるが、その場合はそのまま env だけで動く)
         volume_path = _VOLUME_BASE.format(catalog=catalog, schema=schema)
         for cand in (
             f"{volume_path}/config.json",
@@ -27,35 +49,20 @@ def load_config() -> dict:
         ):
             try:
                 with open(cand, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-                cfg["_source"] = "volume"
+                    vol_cfg = json.load(f)
                 cfg["_loaded_from"] = cand
-                # 環境変数の方を優先 (config.json 内の値が空でも環境変数があれば動かす)
-                cfg.setdefault("catalog", catalog)
-                cfg.setdefault("schema",  schema)
-                return cfg
+                if not cfg["warehouse_id"] and vol_cfg.get("warehouse_id"):
+                    cfg["warehouse_id"] = vol_cfg["warehouse_id"]
+                if not cfg["genie_space_id"] and vol_cfg.get("genie_space_id"):
+                    cfg["genie_space_id"] = vol_cfg["genie_space_id"]
+                break
             except FileNotFoundError:
                 continue
             except Exception as e:
-                # 読めたが JSON が壊れている等
-                cfg = {
-                    "_source":      "volume",
-                    "_loaded_from": cand,
-                    "_load_error":  str(e),
-                    "catalog":      catalog,
-                    "schema":       schema,
-                }
-                return cfg
+                cfg["_volume_load_error"] = str(e)
+                break
 
-        # Volume から読めなかった場合でも環境変数があれば databricks モードとして動かす
-        # (config.json が無くても warehouse_id 不要のテーブルアクセスは可能)
-        return {
-            "_source":  "env",
-            "catalog":  catalog,
-            "schema":   schema,
-            "warehouse_id":   None,
-            "genie_space_id": None,
-        }
+        return cfg
 
     if _LOCAL_PATH.exists():
         with open(_LOCAL_PATH, "r", encoding="utf-8") as f:
