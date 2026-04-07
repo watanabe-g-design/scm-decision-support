@@ -2,15 +2,15 @@ command:
   - "streamlit"
   - "run"
   - "app.py"
-  - "--server.port=8501"
-  - "--server.enableStaticServing=true"
+  - "--server.port=${DATABRICKS_APP_PORT}"
+  - "--server.address=0.0.0.0"
+  - "--server.headless=true"
+  - "--server.enableCORS=false"
+  - "--server.enableXsrfProtection=false"
+  - "--browser.gatherUsageStats=false"
 
 env:
   - name: SCM_CATALOG
     value: "supply_chain_management"
   - name: SCM_SCHEMA
     value: "main"
-
-resources:
-  memory: 2Gi
-  cpu: "2"
