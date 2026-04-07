@@ -21,7 +21,8 @@ def _run_sql(sql):
     if res.status.state.value != "SUCCEEDED":
         raise RuntimeError(f"SQL failed: {res.status.error}")
 
-    cols = [c.name for c in res.manifest.schema.columns]
+    schema_cols = res.manifest.schema.columns
+    cols = [c.name for c in schema_cols]
     raw_rows = (res.result.data_array if res.result and res.result.data_array else []) or []
 
     # Statement Execution API は INLINE 形式では data_array を list[list[str]] で返す。
@@ -33,7 +34,52 @@ def _run_sql(sql):
         else:
             data.append(list(row))
 
-    return pd.DataFrame(data, columns=cols)
+    df = pd.DataFrame(data, columns=cols)
+
+    # Statement Execution API は値を全て文字列で返す。スキーマ情報を使って正しい dtype に変換する。
+    # type_name は SDK バージョンによって enum/str のいずれもありうるので両対応。
+    INT_TYPES   = {"INT", "INTEGER", "BIGINT", "LONG", "SHORT", "SMALLINT", "TINYINT", "BYTE"}
+    FLOAT_TYPES = {"DOUBLE", "FLOAT", "DECIMAL", "REAL"}
+    BOOL_TYPES  = {"BOOLEAN", "BOOL"}
+    DATE_TYPES  = {"DATE"}
+    TS_TYPES    = {"TIMESTAMP", "TIMESTAMP_NTZ"}
+
+    for col in schema_cols:
+        type_name = getattr(col, "type_name", None)
+        if type_name is None:
+            continue
+        # enum の場合は .value or .name から文字列を取り出す
+        if hasattr(type_name, "value"):
+            type_str = str(type_name.value).upper()
+        elif hasattr(type_name, "name"):
+            type_str = str(type_name.name).upper()
+        else:
+            type_str = str(type_name).upper()
+
+        cname = col.name
+        if cname not in df.columns:
+            continue
+
+        try:
+            if type_str in INT_TYPES:
+                df[cname] = pd.to_numeric(df[cname], errors="coerce").astype("Int64")
+            elif type_str in FLOAT_TYPES:
+                df[cname] = pd.to_numeric(df[cname], errors="coerce")
+            elif type_str in BOOL_TYPES:
+                # API は "true"/"false" 文字列で返す
+                df[cname] = df[cname].map(
+                    lambda v: True if str(v).lower() == "true"
+                    else (False if str(v).lower() == "false" else None)
+                )
+            elif type_str in DATE_TYPES:
+                df[cname] = pd.to_datetime(df[cname], errors="coerce").dt.date
+            elif type_str in TS_TYPES:
+                df[cname] = pd.to_datetime(df[cname], errors="coerce")
+        except Exception:
+            # 変換に失敗してもアプリ全体を落とさず、文字列のまま残す
+            pass
+
+    return df
 
 
 def _gold_table(name):
