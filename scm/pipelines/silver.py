@@ -234,10 +234,11 @@ def silver_lead_times():
         .join(sup, "supplier_id", "left")
         .withColumn(
             "lt_band",
-            F.when(F.col("lead_time_weeks") <= 4, F.lit("Short"))
-            .when(F.col("lead_time_weeks") <= 12, F.lit("Mid"))
-            .when(F.col("lead_time_weeks") <= 26, F.lit("Long"))
-            .otherwise(F.lit("XLong")),
+            F.when(F.col("lead_time_weeks") <= 13, F.lit("13週以内"))
+            .when(F.col("lead_time_weeks") <= 26, F.lit("14週〜半年"))
+            .when(F.col("lead_time_weeks") <= 52, F.lit("半年〜1年"))
+            .when(F.col("lead_time_weeks") <= 78, F.lit("1年〜1.5年"))
+            .otherwise(F.lit("1.5年〜2年")),
         )
     )
 

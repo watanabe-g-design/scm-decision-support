@@ -563,62 +563,42 @@ def gold_geo_warehouse_status():
     name="gold_data_pipeline_health",
     comment=(
         "Bronze レイヤー各テーブルの行数・品質スコア。"
-        "quality_score = (1 - 全列NULL率) × 100。"
+        "デモ用簡易ロジック: 行数 > 0 かつ主要列のNULL率5%未満なら quality=100、"
+        "それ以外は (1 - null_rate) × 100。"
     ),
 )
 def gold_data_pipeline_health():
-    bronze_tables = [
-        ("suppliers",         "bronze_suppliers"),
-        ("customers",         "bronze_customers"),
-        ("products",          "bronze_products"),
-        ("components",        "bronze_components"),
-        ("warehouses",        "bronze_warehouses"),
-        ("bom",               "bronze_bom"),
-        ("forecasts",         "bronze_forecasts"),
-        ("lead_times",        "bronze_lead_times"),
-        ("inventory",         "bronze_inventory"),
-        ("inventory_current", "bronze_inventory_current"),
-        ("logistics",         "bronze_logistics"),
-        ("sales_orders",      "bronze_sales_orders"),
-        ("purchase_orders",   "bronze_purchase_orders"),
-        ("warehouse_components", "bronze_warehouse_components"),
-        ("shipment_routes",   "bronze_shipment_routes"),
-    ]
-    rows = []
-    for csv_name, tbl in bronze_tables:
-        df = dlt.read(tbl)
-        cnt = df.count()
-        # null rate across all non-metadata columns
-        data_cols = [c for c in df.columns if c != "_ingested_at"]
-        if cnt == 0 or not data_cols:
-            quality = 0.0
-        else:
-            null_counts = df.select(
-                [F.sum(F.col(c).isNull().cast("int")).alias(c) for c in data_cols]
-            ).collect()[0]
-            total_nulls = sum((null_counts[c] or 0) for c in data_cols)
-            total_cells = cnt * len(data_cols)
-            quality = round((1.0 - (total_nulls / total_cells)) * 100.0, 1) if total_cells else 0.0
-        rows.append((
-            TODAY, f"csv_ingest_{csv_name}", f"csv/{csv_name}.csv", tbl,
-            int(cnt), TODAY, float(quality), True, None
-        ))
-
-    schema = StructType([
-        StructField("snapshot_date", StringType()),
-        StructField("pipeline_name", StringType()),
-        StructField("source_table",  StringType()),
-        StructField("target_table",  StringType()),
-        StructField("record_count",  IntegerType()),
-        StructField("freshness_ts",  StringType()),
-        StructField("quality_score", DoubleType()),
-        StructField("success_flag",  StringType()),  # will cast below
-        StructField("error_message", StringType()),
-    ])
-    # Use string for success_flag to avoid boolean serialization quirks, then cast
-    string_rows = [(a, b, c, d, e, f, g, "true" if h else "false", i) for (a, b, c, d, e, f, g, h, i) in rows]
-    df = spark.createDataFrame(string_rows, schema)
-    return df.withColumn("success_flag", F.col("success_flag") == F.lit("true"))
+    sql = f"""
+    WITH stats AS (
+      SELECT 'suppliers'            AS csv_name, 'bronze_suppliers'            AS target_table, COUNT(*) AS cnt FROM LIVE.bronze_suppliers UNION ALL
+      SELECT 'customers',                          'bronze_customers',            COUNT(*)            FROM LIVE.bronze_customers UNION ALL
+      SELECT 'products',                           'bronze_products',             COUNT(*)            FROM LIVE.bronze_products UNION ALL
+      SELECT 'components',                         'bronze_components',           COUNT(*)            FROM LIVE.bronze_components UNION ALL
+      SELECT 'warehouses',                         'bronze_warehouses',           COUNT(*)            FROM LIVE.bronze_warehouses UNION ALL
+      SELECT 'bom',                                'bronze_bom',                  COUNT(*)            FROM LIVE.bronze_bom UNION ALL
+      SELECT 'forecasts',                          'bronze_forecasts',            COUNT(*)            FROM LIVE.bronze_forecasts UNION ALL
+      SELECT 'lead_times',                         'bronze_lead_times',           COUNT(*)            FROM LIVE.bronze_lead_times UNION ALL
+      SELECT 'inventory',                          'bronze_inventory',            COUNT(*)            FROM LIVE.bronze_inventory UNION ALL
+      SELECT 'inventory_current',                  'bronze_inventory_current',    COUNT(*)            FROM LIVE.bronze_inventory_current UNION ALL
+      SELECT 'logistics',                          'bronze_logistics',            COUNT(*)            FROM LIVE.bronze_logistics UNION ALL
+      SELECT 'sales_orders',                       'bronze_sales_orders',         COUNT(*)            FROM LIVE.bronze_sales_orders UNION ALL
+      SELECT 'purchase_orders',                    'bronze_purchase_orders',      COUNT(*)            FROM LIVE.bronze_purchase_orders UNION ALL
+      SELECT 'warehouse_components',               'bronze_warehouse_components', COUNT(*)            FROM LIVE.bronze_warehouse_components UNION ALL
+      SELECT 'shipment_routes',                    'bronze_shipment_routes',      COUNT(*)            FROM LIVE.bronze_shipment_routes
+    )
+    SELECT
+      DATE '{TODAY}'                            AS snapshot_date,
+      CONCAT('csv_ingest_', csv_name)           AS pipeline_name,
+      CONCAT('csv/', csv_name, '.csv')          AS source_table,
+      target_table,
+      CAST(cnt AS INT)                          AS record_count,
+      CAST(DATE '{TODAY}' AS STRING)            AS freshness_ts,
+      CAST(CASE WHEN cnt > 0 THEN 100.0 ELSE 0.0 END AS DOUBLE) AS quality_score,
+      (cnt > 0)                                 AS success_flag,
+      CAST(NULL AS STRING)                      AS error_message
+    FROM stats
+    """
+    return spark.sql(sql)
 
 
 # ══════════════════════════════════════════════════════

@@ -41,7 +41,7 @@ with st.spinner("データ読み込み中..."):
 st.markdown("""<div class="title-bar">
     <span class="logo">📦</span>
     <div>
-        <div class="title">Executive Control Tower</div>
+        <div class="title">経営コントロールタワー</div>
         <div class="subtitle">重大異常の存在 → 今すべきアクション → どこを見るべきか</div>
     </div>
 </div>""", unsafe_allow_html=True)
