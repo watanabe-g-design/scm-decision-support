@@ -23,7 +23,7 @@ class GenieClient:
 
     def query(self, prompt: str, context: dict = None) -> dict:
         """
-        Genie に質問を送信
+        Genie に質問を送信し、応答テキスト + 実行された SQL を取得する
 
         Args:
             prompt: 自然言語の質問
@@ -35,7 +35,7 @@ class GenieClient:
         """
         if not self.is_available:
             return {
-                "text": "Genie は Databricks 接続時に利用可能です。接続後にお試しください。",
+                "text": "Genie は未接続です。SCM_GENIE_SPACE_ID 環境変数を設定してください。",
                 "sql": None, "error": None,
             }
 
@@ -49,20 +49,64 @@ class GenieClient:
         try:
             from databricks.sdk import WorkspaceClient
             w = WorkspaceClient()
+
+            # Step 1: 会話開始 (待機付き) — メッセージ ID を取得
             conv = w.genie.start_conversation_and_wait(
-                space_id=self._space_id, content=enriched_prompt)
+                space_id=self._space_id,
+                content=enriched_prompt,
+            )
+
+            # 会話オブジェクトから conversation_id と message_id を取得
+            conv_id = getattr(conv, "conversation_id", None) or (
+                conv.conversation.id if getattr(conv, "conversation", None) else None
+            )
+            msg_id = getattr(conv, "message_id", None) or getattr(conv, "id", None)
+            if not conv_id or not msg_id:
+                # フォールバック: messages 配列から取得
+                if hasattr(conv, "messages") and conv.messages:
+                    msg = conv.messages[-1]
+                    conv_id = conv_id or getattr(msg, "conversation_id", None)
+                    msg_id  = msg_id  or getattr(msg, "id", None)
 
             text_content = ""
             sql_content = None
-            for msg in (conv.messages or []):
-                if msg.role and msg.role.value == "ASSISTANT":
+
+            # Step 2: メッセージを取得して attachments を解析
+            if conv_id and msg_id:
+                try:
+                    msg = w.genie.get_message(
+                        space_id=self._space_id,
+                        conversation_id=conv_id,
+                        message_id=msg_id,
+                    )
                     for att in (msg.attachments or []):
-                        if att.text:  text_content = att.text.content or ""
-                        if att.query: sql_content  = att.query.query or None
+                        # テキスト応答
+                        if hasattr(att, "text") and att.text and getattr(att.text, "content", None):
+                            text_content = att.text.content
+                        # SQL クエリ
+                        if hasattr(att, "query") and att.query:
+                            sql_content = getattr(att.query, "query", None) or sql_content
+                            # クエリ説明があればテキストに追加
+                            desc = getattr(att.query, "description", None)
+                            if desc and not text_content:
+                                text_content = desc
+                except Exception:
+                    pass
+
+            # フォールバック: conv オブジェクト直下の attachments もチェック
+            if not text_content and not sql_content and hasattr(conv, "attachments"):
+                for att in (conv.attachments or []):
+                    if hasattr(att, "text") and att.text and getattr(att.text, "content", None):
+                        text_content = att.text.content
+                    if hasattr(att, "query") and att.query:
+                        sql_content = getattr(att.query, "query", None) or sql_content
+
+            if not text_content and not sql_content:
+                text_content = "(Genie から応答が取得できませんでした。Space ID と権限設定を確認してください)"
 
             return {"text": text_content, "sql": sql_content, "error": None}
         except Exception as e:
-            return {"text": "", "sql": None, "error": str(e)}
+            return {"text": "", "sql": None, "error": f"{type(e).__name__}: {e}"}
 
     def generate_summary(self, data_context: str) -> str:
         """

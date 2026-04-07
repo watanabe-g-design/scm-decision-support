@@ -31,6 +31,23 @@ if "lead_time_weeks" in trend.columns:
 if "effective_date" in trend.columns:
     trend["effective_date"] = pd.to_datetime(trend["effective_date"], errors="coerce", format="mixed")
 
+
+def _classify_lt_band(weeks):
+    """LT バンドを週数から計算 (Gold テーブルに lt_band が無い場合のフォールバック)"""
+    if pd.isna(weeks):
+        return None
+    w = float(weeks)
+    if w <= 13:  return "13週以内"
+    if w <= 26:  return "14週〜半年"
+    if w <= 52:  return "半年〜1年"
+    if w <= 78:  return "1年〜1.5年"
+    return "1.5年〜2年"
+
+
+# Gold 側で lt_band が NULL/空のケースに備え、ここで再計算で上書き保証
+if "latest_lt_weeks" in snapshot.columns:
+    snapshot["lt_band"] = snapshot["latest_lt_weeks"].apply(_classify_lt_band)
+
 BAND_COLORS = {"13週以内":"#2ea043","14週〜半年":"#58a6ff","半年〜1年":"#ffa000",
                "1年〜1.5年":"#f78166","1.5年〜2年":"#ff4646"}
 

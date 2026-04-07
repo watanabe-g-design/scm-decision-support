@@ -164,24 +164,59 @@ st.markdown("---")
 # ══════════════════════════════════════════
 # ④ AI/Genie Panel (展開式 — 初期は閉じた状態)
 # ══════════════════════════════════════════
-with st.expander("🤖 SCM Genie — 画面の数字の意味を確認・深掘り (Databricks接続時)", expanded=False):
+with st.expander("🤖 SCM Genie — 画面の数字の意味を確認・深掘り", expanded=False):
     genie = get_genie_client()
-    cols = st.columns(4)
-    for i, q in enumerate(SAMPLE_QUERIES[:8]):
-        with cols[i%4]:
-            if st.button(q[:28]+"..." if len(q)>28 else q, key=f"sq_{i}"):
-                st.session_state.genie_messages.append({"role":"user","content":q})
 
-    for msg in st.session_state.genie_messages:
-        if msg["role"]=="user": st.chat_message("user").write(msg["content"])
-        else:
-            with st.chat_message("assistant"):
+    if not genie.is_available:
+        st.warning(
+            "Genie が未接続です。`SCM_GENIE_SPACE_ID` 環境変数を設定し、"
+            "App のサービスプリンシパルに Genie スペースの 'Can run' 権限を付与してください。"
+        )
+    else:
+        st.caption(
+            "💬 SCMデータに自然言語で質問できます。"
+            "下のサンプル質問をクリックするか、自由入力してください。"
+        )
+
+        def _ask_genie(question: str):
+            """Genie に質問を送信して結果をセッションに保存"""
+            st.session_state.genie_messages.append({"role": "user", "content": question})
+            with st.spinner("Genie に問い合わせ中..."):
+                result = genie.query(question)
+            answer = result.get("text") or "(回答なし)"
+            if result.get("error"):
+                answer = f"⚠️ エラー: {result['error']}"
+            payload = {"role": "assistant", "content": answer}
+            if result.get("sql"):
+                payload["sql"] = result["sql"]
+            st.session_state.genie_messages.append(payload)
+
+        # サンプル質問ボタン
+        st.markdown("**サンプル質問**")
+        cols = st.columns(2)
+        for i, q in enumerate(SAMPLE_QUERIES[:8]):
+            with cols[i % 2]:
+                if st.button(q, key=f"sq_{i}", use_container_width=True):
+                    _ask_genie(q)
+                    st.rerun()
+
+        st.markdown("---")
+
+        # 会話履歴
+        for msg in st.session_state.genie_messages:
+            with st.chat_message(msg["role"]):
                 st.write(msg["content"])
+                if msg.get("sql"):
+                    with st.expander("実行された SQL を表示"):
+                        st.code(msg["sql"], language="sql")
 
-    if prompt := st.chat_input("SCMデータについて質問..."):
-        st.session_state.genie_messages.append({"role":"user","content":prompt})
-        st.chat_message("user").write(prompt)
-        with st.chat_message("assistant"):
-            result = genie.query(prompt)
-            st.write(result.get("text",""))
-            st.session_state.genie_messages.append({"role":"assistant","content":result.get("text","")})
+        # フリー入力
+        if prompt := st.chat_input("SCMデータについて質問..."):
+            _ask_genie(prompt)
+            st.rerun()
+
+        # 会話クリアボタン
+        if st.session_state.genie_messages:
+            if st.button("🗑️ 会話履歴をクリア", key="clear_genie"):
+                st.session_state.genie_messages = []
+                st.rerun()

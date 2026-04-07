@@ -24,17 +24,55 @@ summary = get_exec_summary().iloc[0]
 st.markdown("## 🛠️ データ信頼性センター")
 st.caption("今日のデータは信用してよいか — 信頼のための表舞台")
 
-# ── 本日のダッシュボード信頼度 (仕様書§12) ──
+# ── 信頼度計算ロジックの説明 (仕様書§12: 信頼のための表舞台) ──
+with st.expander("📐 信頼度スコアの計算ロジック (前提条件)", expanded=False):
+    st.markdown("""
+**ダッシュボード信頼度** = `(パイプライン成功率 × 0.5) + (平均データ品質 × 0.5)` (0〜100%)
+
+| 指標 | 定義 | 出典 |
+|---|---|---|
+| **パイプライン数** | Bronze 層で取り込んだソーステーブル数 | `gold_data_pipeline_health` |
+| **成功** | `success_flag = TRUE` の行数 (= 行数 > 0 のテーブル) | 同上 |
+| **失敗** | `success_flag = FALSE` の行数 | 同上 |
+| **平均品質** | `quality_score` の平均 (0〜100%)。デモ環境では行数 > 0 → 100% | 同上 |
+
+**判定**: 80%以上=🟢健全, 60〜79%=🟠注意, 60%未満=🔴要調査
+""")
+
+# ── 数値の正規化 (Gold 側が壊れている場合のフォールバック計算) ──
 total = len(pipeline)
-success = int(pipeline["success_flag"].sum()) if "success_flag" in pipeline.columns else total
-avg_q = pipeline["quality_score"].astype(float).mean() if "quality_score" in pipeline.columns else 100
+
+# success_flag が bool でも文字列 'true'/'false' でもどちらでも数えられるようにする
+def _truthy(v):
+    if isinstance(v, bool):  return v
+    return str(v).strip().lower() in ("true", "1", "t", "yes")
+
+if "success_flag" in pipeline.columns:
+    success_series = pipeline["success_flag"].apply(_truthy)
+    success = int(success_series.sum())
+else:
+    success_series = pd.Series([True]*total)
+    success = total
+
+# quality_score を数値化。全部 0 に潰れていた場合は record_count > 0 で代替
+if "quality_score" in pipeline.columns:
+    quality_series = pd.to_numeric(pipeline["quality_score"], errors="coerce").fillna(0)
+else:
+    quality_series = pd.Series([100.0]*total)
+
+if quality_series.sum() == 0 and "record_count" in pipeline.columns:
+    # フォールバック: 行数 > 0 なら品質 100, それ以外 0
+    rc = pd.to_numeric(pipeline["record_count"], errors="coerce").fillna(0)
+    quality_series = (rc > 0).astype(int) * 100.0
+
+avg_q = float(quality_series.mean()) if total > 0 else 0.0
 trust_score = round((success/max(total,1)*50) + (avg_q/100*50), 1)
 
 st.markdown(f"""<div style="background:rgba(46,160,67,0.08);border:2px solid rgba(46,160,67,0.3);
     border-radius:12px;padding:20px;text-align:center;margin-bottom:16px;">
     <div style="font-size:12px;color:#8b949e;">本日のダッシュボード信頼度</div>
     <div style="font-size:48px;font-weight:700;color:{'#2ea043' if trust_score>=80 else '#ffa000' if trust_score>=60 else '#ff4646'};">{trust_score}%</div>
-    <div style="font-size:11px;color:#8b949e;">パイプライン成功率 + データ品質の加重平均</div>
+    <div style="font-size:11px;color:#8b949e;">パイプライン成功率 × 0.5 + 平均品質 × 0.5</div>
 </div>""", unsafe_allow_html=True)
 
 k1,k2,k3,k4 = st.columns(4)
@@ -42,6 +80,11 @@ k1.metric("パイプライン数", f"{total}")
 k2.metric("成功", f"{success}/{total}")
 k3.metric("失敗", f"{total-success}", delta="要調査" if total-success>0 else None, delta_color="inverse")
 k4.metric("平均品質", f"{avg_q:.1f}%")
+
+# 計算で使った正規化済みの値を pipeline DataFrame に書き戻し (下のグラフ・テーブル用)
+pipeline = pipeline.copy()
+pipeline["success_flag"] = success_series.values
+pipeline["quality_score"] = quality_series.values
 
 st.markdown("---")
 
