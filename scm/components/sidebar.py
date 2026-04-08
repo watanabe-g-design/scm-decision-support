@@ -2,7 +2,6 @@
 共通サイドバー — 全ページで同一のナビゲーションを表示
 """
 import streamlit as st
-from services.config import is_demo_mode
 
 
 def render_sidebar():
@@ -13,10 +12,7 @@ def render_sidebar():
             <div style="font-size:10px;color:#8b949e;">Decision Support System</div>
         </div>""", unsafe_allow_html=True)
 
-        if is_demo_mode():
-            st.info("🔸 デモモード", icon=None)
-        else:
-            st.success("🟢 Databricks接続済み", icon=None)
+        st.success("🟢 Databricks接続済み", icon=None)
 
         st.markdown("---")
 

@@ -273,31 +273,46 @@ class GenieClient:
                         error=str(e),
                     )
 
-            # Step 4: 判定
+            # Step 4: 判定 — Genie のテキスト応答があれば「答えがある」とみなす
+            #
+            # 旧ロジックの問題: df が取得失敗 (None or empty) の時に no_data と判定
+            #   → Genie がテキストで答えを返しているのに「該当データなし」と表示する矛盾
+            # 新ロジック:
+            #   - テキスト応答あり: ok 扱い (DataFrame は補助情報)
+            #   - テキスト応答なし + 行あり: ok (DataFrame が主)
+            #   - テキスト応答なし + 行 0: no_data (本当にデータがない)
+            #   - テキスト応答なし + df=None: SQL は出たが取得失敗
+            has_text = bool(text_fallback)
+            has_rows = df is not None and len(df) > 0
+
+            if has_text or has_rows:
+                if has_rows:
+                    msg_str = f"✅ {len(df)} 件"
+                else:
+                    msg_str = "✅ Genie が回答しました"
+                return _result(
+                    "ok",
+                    data=df if has_rows else None,
+                    sql=sql_content,
+                    genie_text=text_fallback,
+                    raw_message=raw_msg,
+                    message=msg_str,
+                )
+
+            # ここまで来た = テキストもデータも無い
             if df is None:
                 return _result(
                     "ng",
                     sql=sql_content,
-                    genie_text=text_fallback,
                     raw_message=raw_msg,
                     message="🔴 NG: SQL は生成されましたが結果を取得できませんでした",
                 )
-            if len(df) == 0:
-                return _result(
-                    "no_data",
-                    data=df,
-                    sql=sql_content,
-                    genie_text=text_fallback,
-                    raw_message=raw_msg,
-                    message="🟡 該当データなし",
-                )
             return _result(
-                "ok",
+                "no_data",
                 data=df,
                 sql=sql_content,
-                genie_text=text_fallback,
                 raw_message=raw_msg,
-                message=f"✅ {len(df)} 件",
+                message="🟡 該当データなし",
             )
 
         except Exception as e:

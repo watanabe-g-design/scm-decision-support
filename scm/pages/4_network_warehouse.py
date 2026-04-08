@@ -10,7 +10,10 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from styles import inject_css
-from services.database import get_geo_warehouse, get_shipment_routes
+from services.database import (
+    get_geo_warehouse, get_shipment_routes,
+    get_silver_inventory_current, get_silver_components,
+)
 from components.japan_map import render_japan_map
 from components.global_filter import render_global_filter
 from components.explain_panel import render_explain
@@ -46,11 +49,17 @@ show_routes = st.toggle("📍 物流ルート表示 (依存分析時のみON)", 
 
 left, right = st.columns([5,2])
 with left:
-    map_df = wh_df.rename(columns={"geo_lat":"latitude","geo_lon":"longitude",
-        "managed_count":"component_count","zero_count":"below_safety_count",
-        "critical_count":"critical_items","high_count":"high_items"})
-    for c in ["total_stock_qty","total_stock_value_jpy","medium_items","incoming_shipments","incoming_qty","delayed_shipments"]:
-        if c not in map_df.columns: map_df[c] = 0
+    map_df = wh_df.rename(columns={
+        "geo_lat":"latitude", "geo_lon":"longitude",
+        "managed_count":"component_count",
+        "zero_count":"below_safety_count",
+        "critical_count":"critical_items",
+        "high_count":"high_items",
+    })
+    # gold_geo_warehouse_status は total_stock_qty/total_stock_value_jpy/incoming_*/delayed_* を持つ
+    # medium_items だけは Gold に存在しないので 0 で埋める
+    if "medium_items" not in map_df.columns:
+        map_df["medium_items"] = 0
     render_japan_map(map_df, routes_df=routes, height=500, show_routes=show_routes)
 
 with right:
@@ -87,9 +96,9 @@ if st.session_state.selected_warehouses:
     s3.metric("過剰在庫 (OVER)", f'{int(sel_wh["over_count"].sum())}品目')
     s4.metric("平均健全性", f'{sel_wh["health_score"].mean():.1f}%')
 
-    # 選択倉庫の在庫一覧
-    inv_cur = pd.read_csv(Path(__file__).parent.parent / "sample_data" / "inventory_current.csv")
-    comp_df = pd.read_csv(Path(__file__).parent.parent / "sample_data" / "components.csv")
+    # 選択倉庫の在庫一覧 (Silver から取得)
+    inv_cur = get_silver_inventory_current()
+    comp_df = get_silver_components()
 
     wh_inv = inv_cur[inv_cur["warehouse_id"].isin(st.session_state.selected_warehouses)]
     wh_inv = wh_inv.merge(comp_df[["component_id","part_number","component_name","component_category","min_stock","max_stock"]], on="component_id", how="left")

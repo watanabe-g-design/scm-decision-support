@@ -492,6 +492,8 @@ def gold_inventory_policy_breach():
     comment=(
         "倉庫別サマリー。health_score = (OK品目数 / 管理品目数) × 100。"
         "zero/under/over カウントは部品単位(全倉庫合計在庫をmin/maxと比較)。"
+        "total_stock_qty/value_jpy は当該倉庫の在庫数量・金額。"
+        "incoming_shipments/qty/delayed_shipments は当該倉庫向けの未到着 PO 件数・数量。"
     ),
 )
 def gold_geo_warehouse_status():
@@ -505,7 +507,7 @@ def gold_geo_warehouse_status():
       SELECT
         cs.component_id,
         cs.total_stock,
-        c.min_stock, c.max_stock,
+        c.min_stock, c.max_stock, c.unit_price_usd,
         CASE WHEN cs.total_stock <= 0 THEN 1 ELSE 0 END AS is_zero,
         CASE WHEN cs.total_stock > 0 AND cs.total_stock < COALESCE(c.min_stock, 100) THEN 1 ELSE 0 END AS is_under,
         CASE WHEN cs.total_stock > COALESCE(c.max_stock, 1000) THEN 1 ELSE 0 END AS is_over,
@@ -516,7 +518,29 @@ def gold_geo_warehouse_status():
       FROM comp_stock cs
       LEFT JOIN LIVE.silver_components c ON cs.component_id = c.component_id
     ),
-    -- 部品×倉庫の関連 (inventory_current が厳密な関連の源)
+    -- 倉庫別の在庫と金額 (inventory_current から)
+    wh_stock AS (
+      SELECT
+        ic.warehouse_id,
+        SUM(ic.stock_qty)                                      AS total_stock_qty,
+        SUM(ic.stock_qty * COALESCE(c.unit_price_usd, 0) * 150) AS total_stock_value_jpy
+      FROM LIVE.silver_inventory_current ic
+      LEFT JOIN LIVE.silver_components c ON ic.component_id = c.component_id
+      GROUP BY ic.warehouse_id
+    ),
+    -- 倉庫向けの入荷予定 PO (logistics)
+    wh_incoming AS (
+      SELECT
+        destination_warehouse_id AS warehouse_id,
+        COUNT(*)                 AS incoming_shipments,
+        SUM(quantity)            AS incoming_qty,
+        SUM(CASE WHEN delay_days > 0 THEN 1 ELSE 0 END) AS delayed_shipments
+      FROM LIVE.silver_logistics
+      WHERE actual_arrival_date IS NULL
+        AND status IN ('in_transit','delayed','ordered','shipped','placed')
+      GROUP BY destination_warehouse_id
+    ),
+    -- 倉庫×部品の関連
     wh_comp AS (
       SELECT DISTINCT warehouse_id, component_id
       FROM LIVE.silver_inventory_current
@@ -543,6 +567,11 @@ def gold_geo_warehouse_status():
       CAST(COALESCE(wa.zero_count,  0) AS INT) AS zero_count,
       CAST(COALESCE(wa.under_count, 0) AS INT) AS under_count,
       CAST(COALESCE(wa.over_count,  0) AS INT) AS over_count,
+      CAST(COALESCE(ws.total_stock_qty, 0) AS INT)         AS total_stock_qty,
+      CAST(COALESCE(ws.total_stock_value_jpy, 0) AS BIGINT) AS total_stock_value_jpy,
+      CAST(COALESCE(wi.incoming_shipments, 0) AS INT) AS incoming_shipments,
+      CAST(COALESCE(wi.incoming_qty,       0) AS INT) AS incoming_qty,
+      CAST(COALESCE(wi.delayed_shipments,  0) AS INT) AS delayed_shipments,
       ROUND(
         CASE WHEN COALESCE(wa.managed_count, 0) = 0 THEN 50.0
              ELSE COALESCE(wa.ok_count, 0) * 100.0 / wa.managed_count
@@ -551,7 +580,9 @@ def gold_geo_warehouse_status():
       CAST(COALESCE(wa.zero_count, 0) + COALESCE(wa.under_count, 0) AS INT) AS critical_count,
       0 AS high_count
     FROM LIVE.silver_warehouses w
-    LEFT JOIN wh_agg wa ON w.warehouse_id = wa.warehouse_id
+    LEFT JOIN wh_agg     wa ON w.warehouse_id = wa.warehouse_id
+    LEFT JOIN wh_stock   ws ON w.warehouse_id = ws.warehouse_id
+    LEFT JOIN wh_incoming wi ON w.warehouse_id = wi.warehouse_id
     """
     return spark.sql(sql)
 

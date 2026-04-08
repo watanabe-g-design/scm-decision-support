@@ -15,7 +15,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from styles import inject_css
-from services.config import is_demo_mode, load_config
+from services.config import load_config
 from services.database import get_pipeline_health, get_exec_summary, get_glossary, get_metric_definitions
 
 st.set_page_config(page_title="データ信頼性センター | SCM判断支援", page_icon="🛠️", layout="wide")
@@ -319,11 +319,8 @@ st.markdown("---")
 # ══════════════════════════════════════════════════════
 st.markdown("### 接続情報")
 cfg = load_config()
-if cfg.get("_source") == "demo":
-    st.info("🔸 デモモード")
-else:
-    st.success("🟢 Databricks接続済み")
-    st.json({k: v for k, v in cfg.items() if k != "_source" and v})
+st.success("🟢 Databricks接続済み")
+st.json({k: v for k, v in cfg.items() if not k.startswith("_") and v})
 
 with st.expander("🔍 デバッグ: gold_data_pipeline_health の生データ", expanded=False):
     st.caption("Lakeflow Pipeline が生成したテーブルの中身をそのまま表示")

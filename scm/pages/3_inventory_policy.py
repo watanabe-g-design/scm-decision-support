@@ -9,7 +9,10 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from styles import inject_css
-from services.database import get_balance_projection, get_inventory_breach
+from services.database import (
+    get_balance_projection, get_inventory_breach,
+    get_silver_components, get_silver_warehouses, get_silver_warehouse_components,
+)
 from components.global_filter import render_global_filter, apply_filters
 from components.explain_panel import render_explain
 
@@ -30,9 +33,6 @@ st.markdown("""
 </div>""", unsafe_allow_html=True)
 
 # ── データ取得 ──────────────────────────────────
-_DATA = Path(__file__).parent.parent / "sample_data"
-
-
 @st.cache_data(ttl=600)
 def load_all():
     balance = get_balance_projection()
@@ -51,17 +51,15 @@ def load_all():
     if "priority_order" in breach.columns:
         breach["priority_order"] = pd.to_numeric(breach["priority_order"], errors="coerce").fillna(9)
 
-    # メーカー情報を結合
-    comp = pd.read_csv(_DATA / "components.csv")
-    sups = pd.read_csv(_DATA / "suppliers.csv")
-    comp_sup = comp.merge(sups[["supplier_id", "supplier_name"]], on="supplier_id", how="left")
-    comp_map = comp_sup.set_index("component_id")[["supplier_name", "component_category"]].to_dict("index")
+    # メーカー情報を Silver から取得 (silver_components は supplier_name が結合済み)
+    comp = get_silver_components()
+    comp_map = comp.set_index("component_id")[["supplier_name", "component_category"]].to_dict("index")
 
-    # 倉庫情報
-    wc = pd.read_csv(_DATA / "warehouse_components.csv")
-    wh = pd.read_csv(_DATA / "warehouses.csv")
+    # 倉庫情報を Silver から取得
+    wc = get_silver_warehouse_components()
+    wh = get_silver_warehouses()
     wc_wh = wc.merge(wh[["warehouse_id", "warehouse_name"]], on="warehouse_id", how="left")
-    # 部品ごとの主倉庫
+    # 部品ごとの主倉庫 (allocation_pct 最大)
     primary_wh = wc_wh.sort_values("allocation_pct", ascending=False).drop_duplicates("component_id")
     wh_map = primary_wh.set_index("component_id")[["warehouse_id", "warehouse_name"]].to_dict("index")
 

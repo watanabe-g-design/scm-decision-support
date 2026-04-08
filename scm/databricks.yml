@@ -51,7 +51,7 @@ targets:
       # Find it in the browser when you are logged in, e.g.
       #   https://adb-1234567890123456.7.azuredatabricks.net
       #   https://dbc-abcdef12-3456.cloud.databricks.com
-      host: https://CHANGE_ME.cloud.databricks.com
+      host: https://macnica-demo2.cloud.databricks.com/
     variables:
       catalog: supply_chain_management
       schema: main
