@@ -66,21 +66,64 @@ notebook_path = (
 )
 print(f"  ノートブックパス: {notebook_path}")
 
-# /Users/.../scm-decision-support/scm/notebooks/02_create_app
-#   → parent x 2 = /Users/.../scm-decision-support/scm
-workspace_source = "/Workspace" + notebook_path.rsplit("/", 2)[0]
-print(f"  App ソースパス : {workspace_source}")
+# notebook_path は /Workspace プレフィックスがある場合とない場合の両方ありうる
+# 例:
+#   /Users/foo/scm-decision-support/scm/notebooks/02_create_app
+#   /Workspace/Users/foo/scm-decision-support/scm/notebooks/02_create_app
+nb_path_norm = notebook_path
+if nb_path_norm.startswith("/Workspace/"):
+    nb_path_norm = nb_path_norm[len("/Workspace"):]
 
-if not os.path.isdir(workspace_source):
-    raise RuntimeError(f"ソースパスが見つかりません: {workspace_source}")
+# notebooks/02_create_app から 2 階層上が scm/ ディレクトリ
+scm_logical_path = nb_path_norm.rsplit("/", 2)[0]  # /Users/foo/scm-decision-support/scm
 
-if not os.path.isfile(f"{workspace_source}/app.yaml"):
-    raise RuntimeError(f"app.yaml が見つかりません: {workspace_source}/app.yaml")
+# Apps API に渡すソースパスは /Workspace プレフィックス付きの形
+# (Apps プラットフォームは Workspace API 経由で読むので、ローカル FS の存在チェックは不要)
+workspace_source = "/Workspace" + scm_logical_path
 
-if not os.path.isfile(f"{workspace_source}/app.py"):
-    raise RuntimeError(f"app.py が見つかりません: {workspace_source}/app.py")
+print(f"  App ソースパス (Apps API 用): {workspace_source}")
+print(f"  論理パス (Workspace API 用):  {scm_logical_path}")
 
-print("  ✅ app.yaml と app.py を確認しました")
+# Workspace API 経由でファイル存在を確認 (ローカル FS の os.path より信頼性が高い)
+from databricks.sdk import WorkspaceClient as _PreCheckClient
+_w_check = _PreCheckClient()
+
+
+def _ws_file_exists(ws_path: str) -> bool:
+    """/Users/... 形式の Workspace パスにファイルが存在するか確認"""
+    try:
+        info = _w_check.workspace.get_status(path=ws_path)
+        return info is not None
+    except Exception:
+        return False
+
+
+required_files = ["app.yaml", "app.py", "requirements.txt"]
+missing = []
+for fname in required_files:
+    ws_file_path = f"{scm_logical_path}/{fname}"
+    if _ws_file_exists(ws_file_path):
+        print(f"  ✅ {fname} を確認 ({ws_file_path})")
+    else:
+        # ローカル FS でも一応試す (新しい Databricks ランタイムでは見える場合がある)
+        if os.path.isfile(f"{workspace_source}/{fname}"):
+            print(f"  ✅ {fname} を確認 (FUSE 経由)")
+        else:
+            missing.append(fname)
+            print(f"  ⚠️ {fname} が見つかりません ({ws_file_path})")
+
+if missing:
+    print()
+    print("⚠️ 必須ファイルが見つかりませんでした:", missing)
+    print("以下を確認してください:")
+    print("  1. Workspace > Git Folder で最新を Pull したか")
+    print("  2. ファイルが scm/ 直下にあるか")
+    print()
+    print("ただし Apps プラットフォーム側では問題なく読める可能性があるため、")
+    print("チェックを警告として扱い、デプロイは継続します。")
+    print()
+
+print("  ➡️  Apps デプロイへ進みます")
 
 # COMMAND ----------
 # MAGIC %md ## ステップ 2/5: App を作成 (冪等)
@@ -92,12 +135,26 @@ from databricks.sdk.service.apps import App
 
 w = WorkspaceClient()
 
-# 既存チェック
+# 既存チェック (存在しない場合のみ NotFound 系の例外を捕捉)
+existing = None
 try:
     existing = w.apps.get(name=APP_NAME)
-    print(f"  ℹ️  App '{APP_NAME}' は既に存在します (status: {existing.compute_status.state if existing.compute_status else 'unknown'})")
+except Exception as e:
+    err_text = str(e).lower()
+    if "not_found" not in err_text and "does not exist" not in err_text and "404" not in err_text:
+        # NotFound 以外の例外は再 raise (権限エラーなどを握り潰さない)
+        print(f"  ⚠️ apps.get で予期しない例外: {e}")
+
+if existing is not None:
+    state = "unknown"
+    try:
+        if getattr(existing, "compute_status", None):
+            state = str(existing.compute_status.state)
+    except Exception:
+        pass
+    print(f"  ℹ️  App '{APP_NAME}' は既に存在します (status: {state})")
     app = existing
-except Exception:
+else:
     print(f"  🆕 App '{APP_NAME}' を新規作成中...")
     app = w.apps.create_and_wait(
         app=App(
@@ -107,9 +164,14 @@ except Exception:
     )
     print(f"  ✅ 作成完了")
 
-# サービスプリンシパルIDを取得 (次のステップでGRANTに使う)
-service_principal = app.service_principal_client_id or app.service_principal_id
-app_url = app.url
+# サービスプリンシパル情報を取得 (次のステップで GRANT に使う)
+# SDK バージョンによって属性名が異なるため getattr で安全に取得
+service_principal = (
+    getattr(app, "service_principal_client_id", None)
+    or getattr(app, "service_principal_id", None)
+    or getattr(app, "service_principal_name", None)
+)
+app_url = getattr(app, "url", None) or "(URL は初回 deploy 後に確定)"
 print(f"  Service Principal: {service_principal}")
 print(f"  App URL          : {app_url}")
 
