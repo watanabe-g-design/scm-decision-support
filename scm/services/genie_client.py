@@ -121,25 +121,30 @@ class GenieClient:
 
         Returns:
             {
-              "status":   "ok" | "no_data" | "ng" | "error",
-              "data":     DataFrame | None,
-              "sql":      str | None,
-              "message":  str,            # ユーザー向け一行メッセージ
-              "elapsed":  float,
-              "error":    str | None,
+              "status":     "ok" | "no_data" | "ng" | "error",
+              "data":       DataFrame | None,
+              "sql":        str | None,
+              "message":    str,                # ユーザー向け一行メッセージ
+              "genie_text": str | None,         # Genie が返した自然言語テキスト (生)
+              "raw_message": dict | None,       # Genie の生レスポンス (デバッグ用)
+              "elapsed":    float,
+              "error":      str | None,
             }
         """
         import time
         start = time.monotonic()
 
-        def _result(status, data=None, sql=None, message="", error=None):
+        def _result(status, data=None, sql=None, message="", genie_text=None,
+                    raw_message=None, error=None):
             return {
-                "status":  status,
-                "data":    data,
-                "sql":     sql,
-                "message": message,
-                "elapsed": round(time.monotonic() - start, 2),
-                "error":   error,
+                "status":      status,
+                "data":        data,
+                "sql":         sql,
+                "message":     message,
+                "genie_text":  genie_text,
+                "raw_message": raw_message,
+                "elapsed":     round(time.monotonic() - start, 2),
+                "error":       error,
             }
 
         if not self.is_available:
@@ -188,6 +193,12 @@ class GenieClient:
                 message_id=msg_id,
             )
 
+            # 生レスポンスを dict に変換 (デバッグ用)
+            try:
+                raw_msg = msg.as_dict() if hasattr(msg, "as_dict") else None
+            except Exception:
+                raw_msg = None
+
             sql_content = None
             attachment_id = None
             text_fallback = ""
@@ -207,14 +218,16 @@ class GenieClient:
                         or attachment_id
                     )
 
-            # Step 3a: SQL 添付がない → 逆質問のみ = NG
+            # Step 3a: SQL 添付がない → 逆質問のみ = NG (Genie のテキストはそのまま返す)
             if not sql_content:
                 return _result(
                     "ng",
+                    genie_text=text_fallback,
+                    raw_message=raw_msg,
                     message=(
-                        "🔴 **NG**: Genie がこの質問を SQL に変換できませんでした。\n\n"
-                        "より具体的な質問に書き直してください。\n"
-                        "例: 「Critical Order は何件?」「在庫が ZERO になる部品の品番は?」"
+                        "🔴 **Genie が SQL を生成できませんでした。**\n\n"
+                        "Genie の応答 (下記) を読んで、より具体的に質問し直してください。\n"
+                        "Genie Space の Instructions / Sample queries が未設定だと曖昧な質問は逆質問になります。"
                     ),
                 )
 
@@ -265,6 +278,8 @@ class GenieClient:
                 return _result(
                     "ng",
                     sql=sql_content,
+                    genie_text=text_fallback,
+                    raw_message=raw_msg,
                     message="🔴 NG: SQL は生成されましたが結果を取得できませんでした",
                 )
             if len(df) == 0:
@@ -272,12 +287,16 @@ class GenieClient:
                     "no_data",
                     data=df,
                     sql=sql_content,
+                    genie_text=text_fallback,
+                    raw_message=raw_msg,
                     message="🟡 該当データなし",
                 )
             return _result(
                 "ok",
                 data=df,
                 sql=sql_content,
+                genie_text=text_fallback,
+                raw_message=raw_msg,
                 message=f"✅ {len(df)} 件",
             )
 
