@@ -1,12 +1,15 @@
 """
 Genie / 生成AI 抽象化レイヤー
 ================================
-- single-turn モード: 各質問を独立した会話として処理
-- multi-turn モード (Research): 同じ conversation_id を保持し、Genie が前の質問の
-  文脈を引き継ぐ。Databricks には現状「Deep Research Agent」を Genie Space に
-  外部から呼び出す公開 API が無いため、multi-turn 会話で擬似的な深掘り体験を実現。
+**設計方針** (2026-04 改訂):
+- LLM の自然言語要約はスキップし、SQL 実行結果の生 DataFrame を返す
+- Genie が逆質問してきた場合 (= SQL を生成できなかった) は status='ng' を返す
+- これにより応答時間を短縮し、Genie 本来の「データを返す」役割に絞る
+
+将来 Deep Research Agent SDK が公開されたら query_research() を追加する設計
 """
 import streamlit as st
+import pandas as pd
 from services.config import load_config, is_databricks_mode
 
 
@@ -16,133 +19,289 @@ class GenieClient:
     def __init__(self):
         self._config = load_config()
         self._space_id = self._config.get("genie_space_id")
-        # multi-turn モード時に保持する会話 ID
-        self._conversation_id = None
 
     @property
     def is_available(self) -> bool:
         return is_databricks_mode() and bool(self._space_id)
 
-    def reset_conversation(self):
-        """会話履歴をリセット (新しい multi-turn セッション開始時に呼ぶ)"""
-        self._conversation_id = None
-
-    def query(self, prompt: str, context: dict = None, multi_turn: bool = False) -> dict:
+    # ── 内部ヘルパー ──────────────────────────────
+    @staticmethod
+    def _normalize_rows(raw_rows, schema_cols):
+        """Statement Execution API の data_array をパースして DataFrame にする。
+        SDK バージョン差分 (list[list[str]] vs list[Row]) を吸収。
+        スキーマの type_name を見て正しい dtype に変換する。
         """
-        Genie に質問を送信し、応答テキスト + 実行された SQL を取得する
+        rows = []
+        for row in (raw_rows or []):
+            if hasattr(row, "values"):
+                rows.append([
+                    cell.str_value if hasattr(cell, "str_value") else cell
+                    for cell in row.values
+                ])
+            else:
+                rows.append(list(row))
 
-        Args:
-            prompt: 自然言語の質問
-            context: 地図選択コンテキスト等
-            multi_turn: True なら同じ conversation_id を継続して使う (リサーチモード)
+        cols = [c.name for c in schema_cols]
+        df = pd.DataFrame(rows, columns=cols)
+
+        INT_TYPES   = {"INT", "INTEGER", "BIGINT", "LONG", "SHORT", "SMALLINT", "TINYINT", "BYTE"}
+        FLOAT_TYPES = {"DOUBLE", "FLOAT", "DECIMAL", "REAL"}
+        BOOL_TYPES  = {"BOOLEAN", "BOOL"}
+        DATE_TYPES  = {"DATE"}
+        TS_TYPES    = {"TIMESTAMP", "TIMESTAMP_NTZ"}
+
+        for col in schema_cols:
+            type_name = getattr(col, "type_name", None)
+            if type_name is None:
+                continue
+            if hasattr(type_name, "value"):
+                type_str = str(type_name.value).upper()
+            elif hasattr(type_name, "name"):
+                type_str = str(type_name.name).upper()
+            else:
+                type_str = str(type_name).upper()
+
+            cname = col.name
+            if cname not in df.columns:
+                continue
+
+            try:
+                if type_str in INT_TYPES:
+                    df[cname] = pd.to_numeric(df[cname], errors="coerce").astype("Int64")
+                elif type_str in FLOAT_TYPES:
+                    df[cname] = pd.to_numeric(df[cname], errors="coerce")
+                elif type_str in BOOL_TYPES:
+                    df[cname] = df[cname].map(
+                        lambda v: True if str(v).lower() == "true"
+                        else (False if str(v).lower() == "false" else None)
+                    )
+                elif type_str in DATE_TYPES:
+                    df[cname] = pd.to_datetime(df[cname], errors="coerce").dt.date
+                elif type_str in TS_TYPES:
+                    df[cname] = pd.to_datetime(df[cname], errors="coerce")
+            except Exception:
+                pass
+
+        return df
+
+    @staticmethod
+    def _extract_query_result(result_obj):
+        """SDK の get_message_attachment_query_result() レスポンスから
+        DataFrame を取り出す。属性名のバージョン差を吸収。
+        """
+        # 多くのバージョン: result.statement_response.{manifest, result.data_array}
+        stmt = (
+            getattr(result_obj, "statement_response", None)
+            or getattr(result_obj, "query_result", None)
+            or result_obj
+        )
+        if stmt is None:
+            return None
+
+        manifest = getattr(stmt, "manifest", None)
+        result = getattr(stmt, "result", None)
+        if not manifest or not result:
+            return None
+
+        schema = getattr(manifest, "schema", None)
+        if not schema:
+            return None
+
+        cols = getattr(schema, "columns", None) or []
+        rows = getattr(result, "data_array", None) or []
+        if not cols:
+            return None
+
+        return GenieClient._normalize_rows(rows, cols)
+
+    # ── 公開メソッド ──────────────────────────────
+    def query(self, prompt: str, context: dict = None) -> dict:
+        """
+        Genie に質問を送信し、SQL 実行結果の DataFrame を取得する
 
         Returns:
-            {"text": str, "sql": str|None, "error": str|None, "elapsed": float}
+            {
+              "status":   "ok" | "no_data" | "ng" | "error",
+              "data":     DataFrame | None,
+              "sql":      str | None,
+              "message":  str,            # ユーザー向け一行メッセージ
+              "elapsed":  float,
+              "error":    str | None,
+            }
         """
         import time
         start = time.monotonic()
 
-        if not self.is_available:
+        def _result(status, data=None, sql=None, message="", error=None):
             return {
-                "text": "Genie は未接続です。SCM_GENIE_SPACE_ID 環境変数を設定してください。",
-                "sql": None, "error": None, "elapsed": 0.0,
+                "status":  status,
+                "data":    data,
+                "sql":     sql,
+                "message": message,
+                "elapsed": round(time.monotonic() - start, 2),
+                "error":   error,
             }
+
+        if not self.is_available:
+            return _result(
+                "error",
+                message="Genie 未接続: SCM_GENIE_SPACE_ID 環境変数を設定してください",
+                error="not_available",
+            )
 
         # コンテキスト注入
         enriched_prompt = prompt
-        if context:
-            if context.get("warehouse_ids"):
-                wh_list = ", ".join(context["warehouse_ids"])
-                enriched_prompt += f"\n\n[コンテキスト: 対象倉庫 = {wh_list}]"
+        if context and context.get("warehouse_ids"):
+            wh_list = ", ".join(context["warehouse_ids"])
+            enriched_prompt += f"\n\n[コンテキスト: 対象倉庫 = {wh_list}]"
 
         try:
             from databricks.sdk import WorkspaceClient
             w = WorkspaceClient()
 
-            conv_id = None
-            msg_id = None
+            # Step 1: 会話開始 → Genie が SQL を生成して実行
+            conv = w.genie.start_conversation_and_wait(
+                space_id=self._space_id,
+                content=enriched_prompt,
+            )
 
-            if multi_turn and self._conversation_id:
-                # 既存の会話に follow-up メッセージを追加
-                msg = w.genie.create_message_and_wait(
-                    space_id=self._space_id,
-                    conversation_id=self._conversation_id,
-                    content=enriched_prompt,
-                )
-                conv_id = self._conversation_id
-                msg_id = getattr(msg, "message_id", None) or getattr(msg, "id", None)
-            else:
-                # 新規会話開始
-                conv = w.genie.start_conversation_and_wait(
-                    space_id=self._space_id,
-                    content=enriched_prompt,
-                )
-                conv_id = getattr(conv, "conversation_id", None) or (
-                    conv.conversation.id if getattr(conv, "conversation", None) else None
-                )
-                msg_id = getattr(conv, "message_id", None) or getattr(conv, "id", None)
-                if not conv_id or not msg_id:
-                    if hasattr(conv, "messages") and conv.messages:
-                        m = conv.messages[-1]
-                        conv_id = conv_id or getattr(m, "conversation_id", None)
-                        msg_id  = msg_id  or getattr(m, "id", None)
+            conv_id = getattr(conv, "conversation_id", None) or (
+                conv.conversation.id if getattr(conv, "conversation", None) else None
+            )
+            msg_id = getattr(conv, "message_id", None) or getattr(conv, "id", None)
+            if not conv_id or not msg_id:
+                if hasattr(conv, "messages") and conv.messages:
+                    m = conv.messages[-1]
+                    conv_id = conv_id or getattr(m, "conversation_id", None)
+                    msg_id  = msg_id  or getattr(m, "id", None)
 
-                # multi-turn モードのために会話 ID を保存
-                if multi_turn and conv_id:
-                    self._conversation_id = conv_id
+            if not (conv_id and msg_id):
+                return _result(
+                    "ng",
+                    message="🔴 NG: Genie からメッセージ ID を取得できませんでした",
+                )
 
-            text_content = ""
+            # Step 2: メッセージ詳細を取得して attachments を解析
+            msg = w.genie.get_message(
+                space_id=self._space_id,
+                conversation_id=conv_id,
+                message_id=msg_id,
+            )
+
             sql_content = None
+            attachment_id = None
+            text_fallback = ""
 
-            if conv_id and msg_id:
-                try:
-                    msg = w.genie.get_message(
+            for att in (msg.attachments or []):
+                # 自然言語の逆質問テキストがある場合 (= SQL 生成失敗のサイン)
+                if hasattr(att, "text") and att.text:
+                    txt = getattr(att.text, "content", None)
+                    if txt and not text_fallback:
+                        text_fallback = txt
+                # SQL クエリの添付がある場合
+                if hasattr(att, "query") and att.query:
+                    sql_content = getattr(att.query, "query", None) or sql_content
+                    attachment_id = (
+                        getattr(att, "attachment_id", None)
+                        or getattr(att, "id", None)
+                        or attachment_id
+                    )
+
+            # Step 3a: SQL 添付がない → 逆質問のみ = NG
+            if not sql_content:
+                return _result(
+                    "ng",
+                    message=(
+                        "🔴 **NG**: Genie がこの質問を SQL に変換できませんでした。\n\n"
+                        "より具体的な質問に書き直してください。\n"
+                        "例: 「Critical Order は何件?」「在庫が ZERO になる部品の品番は?」"
+                    ),
+                )
+
+            # Step 3b: SQL 結果を取得
+            df = None
+            try:
+                # 新しい SDK: get_message_attachment_query_result
+                if attachment_id and hasattr(w.genie, "get_message_attachment_query_result"):
+                    qr = w.genie.get_message_attachment_query_result(
+                        space_id=self._space_id,
+                        conversation_id=conv_id,
+                        message_id=msg_id,
+                        attachment_id=attachment_id,
+                    )
+                    df = self._extract_query_result(qr)
+
+                # 旧 SDK フォールバック: get_message_query_result
+                if df is None and hasattr(w.genie, "get_message_query_result"):
+                    qr = w.genie.get_message_query_result(
                         space_id=self._space_id,
                         conversation_id=conv_id,
                         message_id=msg_id,
                     )
-                    for att in (msg.attachments or []):
-                        if hasattr(att, "text") and att.text and getattr(att.text, "content", None):
-                            text_content = att.text.content
-                        if hasattr(att, "query") and att.query:
-                            sql_content = getattr(att.query, "query", None) or sql_content
-                            desc = getattr(att.query, "description", None)
-                            if desc and not text_content:
-                                text_content = desc
-                except Exception:
-                    pass
+                    df = self._extract_query_result(qr)
+            except Exception as e:
+                # 取得失敗 → SQL を Statement Execution で直接実行する最終手段
+                try:
+                    cfg = self._config
+                    res = w.statement_execution.execute_statement(
+                        statement=sql_content,
+                        warehouse_id=cfg["warehouse_id"],
+                        wait_timeout="30s",
+                    )
+                    if res.status.state.value == "SUCCEEDED" and res.manifest and res.result:
+                        df = self._normalize_rows(
+                            res.result.data_array, res.manifest.schema.columns
+                        )
+                except Exception as e2:
+                    return _result(
+                        "error",
+                        sql=sql_content,
+                        message=f"⚠️ SQL 結果取得に失敗: {e2}",
+                        error=str(e),
+                    )
 
-            if not text_content and not sql_content:
-                text_content = "(Genie から応答が取得できませんでした。Space ID と権限設定を確認してください)"
+            # Step 4: 判定
+            if df is None:
+                return _result(
+                    "ng",
+                    sql=sql_content,
+                    message="🔴 NG: SQL は生成されましたが結果を取得できませんでした",
+                )
+            if len(df) == 0:
+                return _result(
+                    "no_data",
+                    data=df,
+                    sql=sql_content,
+                    message="🟡 該当データなし",
+                )
+            return _result(
+                "ok",
+                data=df,
+                sql=sql_content,
+                message=f"✅ {len(df)} 件",
+            )
 
-            return {
-                "text":    text_content,
-                "sql":     sql_content,
-                "error":   None,
-                "elapsed": round(time.monotonic() - start, 2),
-            }
         except Exception as e:
-            return {
-                "text":    "",
-                "sql":     None,
-                "error":   f"{type(e).__name__}: {e}",
-                "elapsed": round(time.monotonic() - start, 2),
-            }
+            return _result(
+                "error",
+                message=f"⚠️ Genie 呼び出しエラー",
+                error=f"{type(e).__name__}: {e}",
+            )
 
     def generate_summary(self, data_context: str) -> str:
         return f"[AI要約] {data_context[:200]}..."
 
 
-# サンプルクエリ集
+# サンプル質問集 — 具体的で SQL に変換しやすいものに統一
 SAMPLE_QUERIES = [
-    "今すぐ発注が必要なCRITICAL部品の一覧を教えてください",
-    "過剰在庫になっている部品はどれですか？",
-    "名古屋倉庫で安全在庫を割っている部品は？",
-    "物流遅延率が最も高いメーカーはどこですか？",
-    "今月のFCST精度が最も低いカテゴリは？",
-    "横持ち候補になっている部品はありますか？",
-    "リードタイムが最も長い部品トップ5を教えてください",
-    "来月の需要予測に対して在庫は足りていますか？",
+    "Critical Order は何件ありますか?",
+    "LT が 16 週を超える部品の品番と部品名を教えてください",
+    "在庫が ZERO 予測の部品の品番一覧を教えてください",
+    "メーカー別に Critical Order の件数を集計してください",
+    "倉庫別の健全性スコアを教えてください",
+    "OVER (過剰在庫) になっている部品の数を教えてください",
+    "今週の優先アクション上位 10 件を教えてください",
+    "LT 長期化品目の品番と現在 LT を教えてください",
 ]
 
 
