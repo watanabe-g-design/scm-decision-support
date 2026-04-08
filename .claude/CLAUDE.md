@@ -39,12 +39,26 @@ It is a decision-support application for procurement, SCM, manufacturing control
 - Every AI answer must include scope, filters, and data period when available.
 
 ## Current screen structure (6 modules)
-- A. 経営コントロールタワー (app.py)
-- B. LTインテリジェンス (pages/1_lt_intelligence.py)
-- C. 納期コミット・需給バランス (pages/2_commit_supply_balance.py)
-- D. 在庫基準逸脱レーダー (pages/3_inventory_policy.py)
-- E. 拠点・倉庫健全性 (pages/4_network_warehouse.py)
-- F. データ信頼性センター (pages/5_data_reliability.py)
+Each screen has a distinct main entity (axis). Same Gold tables can be referenced
+from multiple screens but the **subject of the question** must be different.
+- A. 経営コントロールタワー (app.py) — 横断軸
+- B. LTインテリジェンス (pages/1_lt_intelligence.py) — 時間軸 (LT)
+- C. 納期コミットリスク (pages/2_commit_supply_balance.py) — オーダー軸 (sales_order_id)
+- D. 在庫基準逸脱レーダー (pages/3_inventory_policy.py) — 品目軸 (component_id)
+- E. 拠点・倉庫健全性 (pages/4_network_warehouse.py) — 拠点軸 (warehouse_id)
+- F. データ信頼性センター (pages/5_data_reliability.py) — メタ軸 (Pipeline)
+
+### MECE constraints
+- C must NOT show monthly balance projection (that is D's job)
+- D is the SOLE owner of monthly balance projection and ZERO/UNDER/OVER classification
+- C may show requirement timeline ONLY as a per-order drill-down evidence panel
+- Any cross-axis information should be implemented as a `st.page_link` to the owning screen
+
+### Streamlit Apps constraints (must respect)
+- `st.chat_input` cannot be used inside `st.expander`, `st.tabs`, `st.columns`, or any container.
+  Use `st.form` + `st.text_input` + `st.form_submit_button` inside containers instead.
+- `st.status` cannot be nested inside `st.expander`. Use `st.empty()` + `st.spinner` instead.
+- `st.expander` cannot be nested inside another `st.expander` or `st.chat_message`.
 
 ## Gold tables (14)
 gold_exec_summary_daily, gold_lt_snapshot_current, gold_lt_trend_monthly,

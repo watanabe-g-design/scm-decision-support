@@ -34,6 +34,9 @@
 | E | 🗺️ 拠点・倉庫健全性 | **拠点軸 (warehouse_id)** | どの倉庫の健全性が低いか? | 倉庫長, SCM企画 | pages/4_network_warehouse.py |
 | F | 🛠️ データ信頼性センター | **メタ軸 (Pipeline)** | データを信頼してよいか? | データ管理者 | pages/5_data_reliability.py |
 
+> 📌 旧称: C は元々「納期コミット・需給バランス」だったが、2026-04 の MECE リファクタで
+> 「納期コミットリスク」(オーダー軸専用) に名称変更。月次需給バランス機能は D に統合済み。
+
 ### 軸間のクロスリンク
 - C (オーダー軸) で問題のあるオーダーをドリルダウン → 該当部品を **D (品目軸)** で月次予測
 - D (品目軸) で逸脱品目を発見 → どの倉庫に偏っているかを **E (拠点軸)** で確認
@@ -144,8 +147,9 @@ scm/
 │   └── japan_map.py                # Leaflet日本地図
 │
 ├── notebooks/
-│   ├── 00_setup_catalog.py         # カタログ/Volume/CSVコピーのみ (Pipeline前)
-│   └── 01_create_genie.py          # Genieスペース作成 (Pipeline後)
+│   ├── 00_setup_catalog.py         # カタログ/Schema/Volume 作成 + CSV コピー (Pipeline前)
+│   ├── 01_create_genie.py          # Genie スペース作成手順表示 + Space ID を config.json に書き込み
+│   └── 02_create_app.py            # Databricks App 自動作成 + デプロイ + UC GRANT
 │
 ├── pipelines/                      # Lakeflow Declarative Pipeline
 │   ├── bronze.py                   # 15 Bronze tables (CSV → Delta)
@@ -182,26 +186,59 @@ scm/
 
 ## 7. Databricksデプロイ
 
-Lakeflow Declarative Pipeline + Databricks Asset Bundle (DAB) ベース。
+Lakeflow Declarative Pipeline + Databricks Asset Bundle (DAB) + 自動 App 作成ノートブックの組み合わせ。
 
 ```
- 1. GitHub にコード push
+ 1. ローカル: GitHub にコード push
  2. Databricks: Workspace > Git Folder で最新を Pull
  3. Databricks: notebooks/00_setup_catalog を Run All
-    → カタログ/スキーマ/Volume 作成, CSV コピー, config.json 雛形
- 4. ローカル PC: `cd scm && databricks bundle deploy -t dev`
-    → Lakeflow Pipeline と関連リソースを UC にデプロイ
- 5. Databricks: Workflows > Pipelines > scm_decision_support_pipeline を手動実行
+    → カタログ/スキーマ/Volume 作成, CSV を Volume へコピー, config.json 雛形を書き出し
+ 4. ローカル PC:
+        cd scm
+        databricks bundle validate -t dev
+        databricks bundle deploy   -t dev
+    → Lakeflow Pipeline (scm_decision_support_pipeline) を UC にデプロイ
+ 5. Databricks: Workflows > Pipelines > scm_decision_support_pipeline を Start
     → Bronze 15 / Silver 15 / Gold 14 テーブルと UC Lineage グラフを生成
- 6. Databricks: notebooks/01_create_genie を Run All
-    → Genie スペース作成, config.json に warehouse_id と genie_space_id を書き込み
- 7. Databricks: Compute > Apps > scm-decision-support を Redeploy
-    環境変数: SCM_CATALOG=supply_chain_management, SCM_SCHEMA=main
+    → 通常 5〜10 分。完走したら Catalog UI で 44 テーブルを確認
+ 6. ブラウザで Genie スペースを手動作成 (現状 SDK 未対応):
+    a. Databricks 左サイドバー → Genie → + New → Genie space
+    b. SQL Warehouse を選択し、14 個の Gold テーブル + 3 個の Silver マスタを登録
+    c. 作成された Space の URL から Space ID をコピー (https://.../genie/rooms/<ID>)
+ 7. Databricks: notebooks/01_create_genie を Run All
+    パラメータ:
+        warehouse_id    = SQL Warehouse の HTTP path 末尾
+        genie_space_id  = ステップ 6c でコピーした ID
+    → Volume 上の config.json に両 ID を書き込み
+ 8. App 用環境変数を scm/app.yaml に設定 (またはステップ 9 で SDK 経由で渡す):
+        SCM_CATALOG       = supply_chain_management
+        SCM_SCHEMA        = main
+        SCM_WAREHOUSE_ID  = <ステップ 7 と同じ>
+        SCM_GENIE_SPACE_ID = <ステップ 6c でコピーした ID>
+ 9. Databricks: notebooks/02_create_app を Run All
+    → App "scm-decision-support" を自動作成 + デプロイ + サービスプリンシパルに UC GRANT
+    → 完了後、表示される URL をブラウザで開いて動作確認
+10. (初回のみ) App のサービスプリンシパルに以下を手動付与:
+    - Genie スペースの "Can run" 権限 (Genie UI の Share ボタン経由)
+    - SQL Warehouse の "Can use" 権限 (Warehouse の Permissions タブ経由)
+    - Pipeline の "Can view" 権限 (Pipeline の Permissions 経由) ← データ信頼性センターで使用
 ```
 
-### Databricks不要ファイル
+### コード修正後の更新フロー (2 回目以降)
+```
+1. ローカルで修正 → git push
+2. Databricks Workspace > Git Folder で Pull
+3. パイプライン本体を変更した場合: Workflows > Pipelines を再 Start
+4. App ソースを変更した場合: notebooks/02_create_app を再 Run All (冪等)
+   または Apps UI から Deploy ボタン
+```
+
+### Databricks 不要ファイル
 - `data_generation/` — デモデータ生成用。Databricksでは不要
 - `sample_data/` — ローカル/デモモード用。本番は Unity Catalog Gold を参照
+- `logic/gold_builder.py`, `logic/safety_stock.py`, `logic/scoring.py` — 旧 Python 実装。
+  Databricks モードでは Lakeflow Pipeline が作る Gold テーブルが正となるが、
+  デモモードのフォールバックとして残してある
 
 ---
 
