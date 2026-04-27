@@ -1,7 +1,3 @@
-"""
-A. Executive Control Tower
-仕様書§7: 5秒で全体異常を掴む。グラフ10個以下。判断の起点。
-"""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -10,328 +6,114 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from styles import inject_css
-from services.database import (
-    get_exec_summary, get_action_queue, get_lt_escalation,
-    get_inventory_breach, get_geo_warehouse, get_silver_components,
-)
-from components.global_filter import render_global_filter
-from components.explain_panel import render_explain, render_metric_explain
-from services.genie_client import get_genie_client, SAMPLE_QUERIES
-
-st.set_page_config(page_title="経営コントロールタワー | SCM判断支援", page_icon="📦", layout="wide")
-inject_css()
-
-if "genie_messages" not in st.session_state:
-    st.session_state.genie_messages = []
-
-# ── 共通サイドバー ────────────────────────────
 from components.sidebar import render_sidebar
+from services.database import (
+    get_silver_forecasts, get_silver_bom, get_silver_components,
+    get_silver_products, get_silver_customers, get_silver_purchase_orders,
+    get_silver_sales_orders, get_silver_inventory_current,
+    get_balance_projection, get_requirement_timeline,
+)
+from services.risk_logic import (
+    build_forecast_risk_df, build_order_delivery_risk_df,
+    build_inventory_df, build_monthly_balance_df, build_overview_kpis,
+)
+
+st.set_page_config(page_title="Overview | SCM需給バランス", layout="wide")
+inject_css()
 render_sidebar()
 
-# ── データ ────────────────────────────────────
-with st.spinner("データ読み込み中..."):
-    summary = get_exec_summary().iloc[0]
-    action_q = get_action_queue()
-    lt_esc = get_lt_escalation()
-    breach = get_inventory_breach()
-    geo = get_geo_warehouse()
+# ---------------------------------------------------------------------------
+# Data loading
+# ---------------------------------------------------------------------------
+with st.spinner("データを読み込んでいます..."):
+    forecasts = get_silver_forecasts()
+    bom = get_silver_bom()
+    components = get_silver_components()
+    products = get_silver_products()
+    customers = get_silver_customers()
+    purchase_orders = get_silver_purchase_orders()
+    sales_orders = get_silver_sales_orders()
+    inventory_current = get_silver_inventory_current()
+    balance = get_balance_projection()
+    timeline = get_requirement_timeline()
 
-# ── タイトル ──────────────────────────────────
-st.markdown("""<div class="title-bar">
-    <span class="logo">📦</span>
-    <div>
-        <div class="title">経営コントロールタワー</div>
-        <div class="subtitle">重大異常の存在 → 今すべきアクション → どこを見るべきか</div>
-    </div>
-</div>""", unsafe_allow_html=True)
+# ---------------------------------------------------------------------------
+# Build risk DataFrames
+# ---------------------------------------------------------------------------
+fc_risk = build_forecast_risk_df(forecasts, bom, components, products, customers, purchase_orders)
+od_risk = build_order_delivery_risk_df(sales_orders)
+inv = build_inventory_df(inventory_current, components, sales_orders)
+mb = build_monthly_balance_df(balance)
+kpis = build_overview_kpis(fc_risk, od_risk, inv, mb)
 
-# ══════════════════════════════════════════
-# ① KPIカード (8枚, 仕様書§7)
-# ══════════════════════════════════════════
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("🔴 Critical Orders", f'{int(summary.get("critical_count",0))}件', help="指定納期3日以内")
-k2.metric("🟠 High Orders", f'{int(summary.get("high_count",0))}件', help="指定納期7日以内")
-k3.metric("📊 LT Escalation", f'{int(summary.get("lt_escalation_item_count",0))}品目', help="N-3/N-6比で↑")
-k4.metric("⚠️ 3M Policy Breaches", f'{int(summary.get("zero_count",0))+int(summary.get("under_count",0))+int(summary.get("over_count",0))}品目')
+# ---------------------------------------------------------------------------
+# Title
+# ---------------------------------------------------------------------------
+st.markdown("## 📊 Overview")
+st.caption("リスクサマリーと優先対応事項")
 
-k5, k6, k7, k8 = st.columns(4)
-k5.metric("🔴 Stockout予測", f'{int(summary.get("zero_count",0))}品目', help="3ヶ月以内にZERO")
-k6.metric("🔵 Excess Inventory", f'{int(summary.get("over_count",0))}品目', help="max超過予測")
-k7.metric("📈 FCST Accuracy", f'{summary.get("forecast_accuracy_pct",0):.1f}%')
-k8.metric("🏭 Warehouse Health", f'{summary.get("warehouse_health_score",0):.1f}%')
+# ---------------------------------------------------------------------------
+# KPI Cards - Row 1
+# ---------------------------------------------------------------------------
+r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+r1c1.metric("🔴 発注リスク Critical", kpis["forecast_critical"])
+r1c2.metric("🟠 発注リスク High", kpis["forecast_high"])
+r1c3.metric("🔴 納品リスク Critical", kpis["delivery_critical"])
+r1c4.metric("🟠 納品リスク High", kpis["delivery_high"])
 
-st.markdown("---")
-
-# ══════════════════════════════════════════
-# ② 今週の優先アクションテーブル (仕様書§7)
-# ══════════════════════════════════════════
-st.markdown("### 今週の優先アクション")
-st.caption("リスク種別 × 推奨アクション × 期限 × 根拠 | 根拠は1文で制約")
-
-if len(action_q) > 0:
-    show_aq = action_q[["risk_type","item_code","item_name","recommended_action",
-                         "due_date","rationale","urgency_rank"]].head(15)
-    show_aq = show_aq.rename(columns={
-        "risk_type":"リスク種別","item_code":"対象","item_name":"部品名",
-        "recommended_action":"推奨アクション","due_date":"期限",
-        "rationale":"根拠","urgency_rank":"緊急度",
-    })
-    st.dataframe(show_aq, use_container_width=True, height=min(400, len(show_aq)*35+40), hide_index=True)
-
-    # 各行のExplain Panel
-    for _, r in action_q.head(5).iterrows():
-        render_explain(
-            title=f"{r.get('item_code','')} {r.get('item_name','')}",
-            rationale=r.get("rationale",""),
-            action=r.get("recommended_action",""),
-            due=str(r.get("due_date","")),
-            severity=r.get("risk_type",""),
-        )
-
-    st.page_link("pages/2_commit_supply_balance.py", label="⚖️ 全オーダー詳細へ →")
-else:
-    st.success("今週の優先アクションはありません")
+# ---------------------------------------------------------------------------
+# KPI Cards - Row 2
+# ---------------------------------------------------------------------------
+r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+r2c1.metric("📦 在庫不足品目", kpis["inventory_shortage"])
+r2c2.metric("⚠️ 在庫 Low 品目", kpis["inventory_low"])
+r2c3.metric("📉 不足月数", kpis["months_with_shortage"])
+r2c4.metric("⏰ 納期超過", kpis["delivery_overdue"])
 
 st.markdown("---")
 
-# ══════════════════════════════════════════
-# ③ 下段: リスク分布 + 倉庫健全性 + FCST精度 + Top5 LT悪化
-# ══════════════════════════════════════════
-col_l, col_r = st.columns(2)
+# ---------------------------------------------------------------------------
+# Top 10 tables
+# ---------------------------------------------------------------------------
+left, right = st.columns(2)
 
-with col_l:
-    # 倉庫健全性 (コンパクト)
-    st.markdown("### 倉庫健全性")
-    for _, w in geo.sort_values("health_score").iterrows():
-        score = w["health_score"]
-        color = "#ff4646" if score < 40 else "#ffa000" if score < 70 else "#2ea043"
-        zero = int(w.get("zero_count",0))
-        under = int(w.get("under_count",0))
-        over = int(w.get("over_count",0))
-        bar_w = max(5, min(100, score))
-        st.markdown(f"""<div style="margin-bottom:3px;padding:5px 8px;background:rgba(255,255,255,0.02);
-            border:1px solid #30363d;border-radius:4px;">
-            <div style="display:flex;justify-content:space-between;">
-                <span style="font-size:12px;">{w['warehouse_name']}</span>
-                <span style="font-size:11px;color:{color};font-weight:600;">{score:.0f}%</span>
-            </div>
-            <div style="background:#30363d;border-radius:2px;height:4px;overflow:hidden;">
-                <div style="background:{color};width:{bar_w}%;height:100%;"></div>
-            </div>
-            <div style="font-size:9px;color:#8b949e;">Z:{zero} U:{under} O:{over}</div>
-        </div>""", unsafe_allow_html=True)
-
-    st.page_link("pages/4_network_warehouse.py", label="🗺️ 拠点・倉庫健全性 →")
-
-with col_r:
-    # FCST精度推移 (Silver から取得)
-    from services.database import _run_sql, _full_table
-    st.markdown("### FCST精度推移")
-    fc = _run_sql(
-        f"SELECT DATE_FORMAT(forecast_month, 'yyyy-MM') AS month, "
-        f"AVG(forecast_accuracy) AS accuracy "
-        f"FROM {_full_table('silver_forecasts')} "
-        f"WHERE forecast_accuracy IS NOT NULL "
-        f"GROUP BY DATE_FORMAT(forecast_month, 'yyyy-MM') "
-        f"ORDER BY month"
-    )
-    fc_m = fc.copy()
-    fc_m["pct"] = (pd.to_numeric(fc_m["accuracy"], errors="coerce") * 100).round(1)
-    fc_m = fc_m.tail(12)
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=fc_m["month"], y=fc_m["pct"],
-        mode="lines+markers", line=dict(color="#58a6ff",width=2.5), marker=dict(size=4),
-        fill="tozeroy", fillcolor="rgba(88,166,255,0.06)"))
-    fig.add_hline(y=85, line_dash="dash", line_color="#2ea043", annotation_text="目標85%", annotation_font_color="#2ea043")
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#c9d1d9"), margin=dict(l=0,r=0,t=8,b=0), height=220,
-        xaxis=dict(gridcolor="#30363d",tickangle=-45), yaxis=dict(gridcolor="#30363d",title="精度(%)",range=[30,100]),
-        showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Top5 LT悪化
-    st.markdown("### LT長期化 Top 5")
-    if len(lt_esc) > 0:
-        for _, r in lt_esc.head(5).iterrows():
-            render_explain(
-                title=f"{r.get('item_code','')} {r.get('item_name','')}",
-                rationale=f"現在{r.get('latest_lt_weeks','')}週 ({r.get('escalation_reason','')})",
-                action="発注タイミング前倒し検討",
-                severity="LT長期化",
-            )
-    st.page_link("pages/1_lt_intelligence.py", label="📊 Lead Time Intelligence →")
-
-st.markdown("---")
-
-# ══════════════════════════════════════════
-# ④ AI/Genie Panel (展開式 — 初期は閉じた状態)
-# ══════════════════════════════════════════
-with st.expander("🤖 SCM Genie — 画面の数字の意味を確認・深掘り", expanded=False):
-    genie = get_genie_client()
-
-    if not genie.is_available:
-        st.warning(
-            "Genie が未接続です。`SCM_GENIE_SPACE_ID` 環境変数を設定し、"
-            "App のサービスプリンシパルに Genie スペースの 'Can run' 権限を付与してください。"
-        )
+with left:
+    st.subheader("発注リスク Top 10")
+    fc_top = fc_risk[fc_risk["status"].isin(["Critical", "High"])].head(10)
+    display_cols_fc = [
+        c for c in ["customer_name", "part_number", "component_name", "days_remaining", "status"]
+        if c in fc_top.columns
+    ]
+    if not fc_top.empty:
+        st.dataframe(fc_top[display_cols_fc], hide_index=True, use_container_width=True)
     else:
-        st.caption(
-            "💬 質問 → Genie が SQL を生成 → SQL 実行結果をテーブルで返します。"
-            "曖昧な質問は逆質問を返さず、**NG** で終了します。具体的な質問を心がけてください。"
-        )
+        st.info("Critical / High の発注リスクはありません。")
 
-        def _ask_genie(question: str):
-            """Genie に質問を送信して結果をセッションに保存。
-            返り値は status='ok'/'no_data'/'ng'/'error' のいずれか。
-            """
-            st.session_state.genie_messages.append({"role": "user", "content": question})
-            progress_slot = st.empty()
-            progress_slot.info("🤖 Genie が SQL を生成 → 実行中...")
-            try:
-                with st.spinner("応答待機中..."):
-                    result = genie.query(question)
-            finally:
-                progress_slot.empty()
+with right:
+    st.subheader("納品リスク Top 10")
+    od_top = od_risk[od_risk["delivery_status"].isin(["Critical", "High"])].head(10)
+    display_cols_od = [
+        c for c in ["sales_order_id", "customer_name", "days_to_delivery", "delivery_status"]
+        if c in od_top.columns
+    ]
+    if not od_top.empty:
+        st.dataframe(od_top[display_cols_od], hide_index=True, use_container_width=True)
+    else:
+        st.info("Critical / High の納品リスクはありません。")
 
-            payload = {
-                "role":        "assistant",
-                "status":      result.get("status", "error"),
-                "message":     result.get("message", ""),
-                "elapsed":     result.get("elapsed", 0),
-                "genie_text":  result.get("genie_text"),
-                "raw_message": result.get("raw_message"),
-            }
-            if result.get("sql"):
-                payload["sql"] = result["sql"]
-            if result.get("data") is not None:
-                payload["data"] = result["data"]
-            if result.get("error"):
-                payload["error"] = result["error"]
-            st.session_state.genie_messages.append(payload)
-
-        # ── サンプル質問ボタン ────────────────────
-        st.markdown("**サンプル質問** (具体的な質問のみ)")
-        cols = st.columns(2)
-        for i, q in enumerate(SAMPLE_QUERIES[:8]):
-            with cols[i % 2]:
-                if st.button(q, key=f"sq_{i}", use_container_width=True):
-                    _ask_genie(q)
-                    st.rerun()
-
-        st.markdown("---")
-
-        # ── 会話履歴 ─────────────────────────────
-        # status に応じて DataFrame / NG / Error を出し分ける
-        for idx, msg in enumerate(st.session_state.genie_messages):
-            with st.chat_message(msg["role"]):
-                if msg["role"] == "user":
-                    st.write(msg["content"])
-                    continue
-
-                status = msg.get("status", "")
-                message = msg.get("message", "")
-
-                # Genie のテキスト応答を最優先で表示 (これが主役)
-                if msg.get("genie_text"):
-                    st.markdown(
-                        f"<div style='background:rgba(88,166,255,0.08);"
-                        f"border-left:4px solid #58a6ff;padding:14px 18px;"
-                        f"border-radius:6px;margin:6px 0;font-size:14px;line-height:1.6;'>"
-                        f"<div style='font-size:11px;color:#8b949e;margin-bottom:6px;'>"
-                        f"🤖 Genie の回答</div>"
-                        f"{msg['genie_text']}</div>",
-                        unsafe_allow_html=True,
-                    )
-
-                # ステータスバナー (補助情報) — テキスト応答が無いときだけ目立たせる
-                has_text_answer = bool(msg.get("genie_text"))
-                if not has_text_answer:
-                    if status == "ok":
-                        st.success(message)
-                    elif status == "no_data":
-                        st.warning(message)
-                    elif status == "ng":
-                        st.error(message)
-                    elif status == "error":
-                        st.error(message)
-                        if msg.get("error"):
-                            st.caption(f"詳細: {msg['error']}")
-                else:
-                    # テキスト応答があるときは小さくキャプション表示のみ
-                    if status in ("ng", "error"):
-                        st.caption(f"⚠️ {message}")
-                        if msg.get("error"):
-                            st.caption(f"詳細: {msg['error']}")
-
-                # 結果テーブル (補助情報、データがあれば表示)
-                if msg.get("data") is not None and len(msg["data"]) > 0:
-                    with st.container():
-                        st.caption("📊 SQL 実行結果:")
-                        st.dataframe(
-                            msg["data"],
-                            use_container_width=True,
-                            height=min(400, len(msg["data"]) * 35 + 38),
-                            hide_index=True,
-                        )
-
-                # 応答時間
-                if msg.get("elapsed"):
-                    st.caption(f"⏱ {msg['elapsed']}秒")
-
-                # 実行 SQL を折りたたみ表示
-                if msg.get("sql"):
-                    show_key = f"show_sql_{idx}"
-                    if show_key not in st.session_state:
-                        st.session_state[show_key] = False
-                    if st.button(
-                        "📄 実行された SQL を表示" if not st.session_state[show_key] else "📄 SQL を隠す",
-                        key=f"toggle_sql_{idx}",
-                    ):
-                        st.session_state[show_key] = not st.session_state[show_key]
-                        st.rerun()
-                    if st.session_state[show_key]:
-                        st.code(msg["sql"], language="sql")
-
-                # Genie 生レスポンス JSON (デバッグ用、ボタンで開閉)
-                if msg.get("raw_message"):
-                    debug_key = f"show_debug_{idx}"
-                    if debug_key not in st.session_state:
-                        st.session_state[debug_key] = False
-                    if st.button(
-                        "🔍 Genie 生レスポンスを表示" if not st.session_state[debug_key] else "🔍 デバッグを隠す",
-                        key=f"toggle_debug_{idx}",
-                    ):
-                        st.session_state[debug_key] = not st.session_state[debug_key]
-                        st.rerun()
-                    if st.session_state[debug_key]:
-                        st.caption(
-                            "Databricks SDK が返した Genie メッセージの生 JSON。"
-                            "attachments の中身を見れば、Genie が何を理解したかが分かります。"
-                        )
-                        st.json(msg["raw_message"])
-
-        # ── フリー入力 ───────────────────────────
-        # NOTE: st.chat_input は expander 内で使えないため text_input + button で代替
-        with st.form("genie_freeform", clear_on_submit=True):
-            prompt = st.text_input(
-                "💬 質問入力",
-                placeholder="例: Critical Order は何件? / 在庫が ZERO の部品は?",
-                label_visibility="collapsed",
-            )
-            submitted = st.form_submit_button("🚀 送信", use_container_width=False)
-            if submitted and prompt.strip():
-                _ask_genie(prompt.strip())
-                st.rerun()
-
-        # ── 会話クリアボタン ─────────────────────
-        if st.session_state.genie_messages:
-            clear_col, _ = st.columns([1, 4])
-            with clear_col:
-                if st.button("🗑️ 会話履歴をクリア", key="clear_genie"):
-                    st.session_state.genie_messages = []
-                    # SQL/デバッグ表示状態もクリア
-                    for k in list(st.session_state.keys()):
-                        if str(k).startswith(("show_sql_", "show_debug_")):
-                            del st.session_state[k]
-                    st.rerun()
+# ---------------------------------------------------------------------------
+# Page links
+# ---------------------------------------------------------------------------
+st.markdown("---")
+st.markdown("##### 詳細ページ")
+lnk1, lnk2, lnk3, lnk4, lnk5 = st.columns(5)
+with lnk1:
+    st.page_link("pages/1_forecast_risk.py", label="📋 発注リスク", icon="📋")
+with lnk2:
+    st.page_link("pages/2_order_delivery_risk.py", label="🚚 納品リスク", icon="🚚")
+with lnk3:
+    st.page_link("pages/3_monthly_balance.py", label="📈 月次需給", icon="📈")
+with lnk4:
+    st.page_link("pages/4_inventory.py", label="📦 在庫確認", icon="📦")
+with lnk5:
+    st.page_link("pages/5_inbound_outbound.py", label="📝 入出庫", icon="📝")

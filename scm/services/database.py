@@ -124,6 +124,13 @@ def get_silver_warehouses():            return _load_table("silver_warehouses")
 def get_silver_warehouse_components():  return _load_table("silver_warehouse_components")
 def get_silver_inventory_current():     return _load_table("silver_inventory_current")
 def get_silver_shipment_routes():       return _load_table("silver_shipment_routes")
+def get_silver_forecasts():             return _load_table("silver_forecasts")
+def get_silver_sales_orders():          return _load_table("silver_sales_orders")
+def get_silver_purchase_orders():       return _load_table("silver_purchase_orders")
+def get_silver_bom():                   return _load_table("silver_bom")
+def get_silver_products():              return _load_table("silver_products")
+def get_silver_customers():             return _load_table("silver_customers")
+def get_silver_logistics():             return _load_table("silver_logistics")
 
 
 # ── 後方互換: 旧 get_shipment_routes ──
