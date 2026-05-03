@@ -1,119 +1,166 @@
+"""
+📊 総合ダッシュボード
+======================
+本Appのトップページ。今日のサマリーと優先対応事項を一画面で把握する。
+
+業務上の役割:
+  - 顧客（購買担当）が朝一に開いて状況を把握
+  - 「今日対応すべき部材は何件か？」を即座に確認
+  - 各詳細ページへの導線
+"""
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent))
 
-import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
+import streamlit as st
+
 from styles import inject_css
 from components.sidebar import render_sidebar
+from components.today_banner import render_today_banner
+from components.inventory_badge import render_inventory_legend
+from services.config import get_as_of_date
 from services.database import (
-    get_silver_forecasts, get_silver_bom, get_silver_components,
-    get_silver_products, get_silver_customers, get_silver_purchase_orders,
-    get_silver_sales_orders, get_silver_inventory_current,
-    get_balance_projection, get_requirement_timeline,
-)
-from services.risk_logic import (
-    build_forecast_risk_df, build_order_delivery_risk_df,
-    build_inventory_df, build_monthly_balance_df, build_overview_kpis,
+    get_silver_demand_plan_components,
+    get_silver_macnica_free_inventory,
+    get_silver_inventory_current,
+    get_procurement_options,
+    get_silver_components,
+    get_silver_purchase_orders,
 )
 
-st.set_page_config(page_title="Overview | SCM需給バランス", layout="wide")
+# ────────────────────────────────────────────────────────
+# 画面設定
+# ────────────────────────────────────────────────────────
+st.set_page_config(page_title="総合ダッシュボード | SCM調達支援", layout="wide")
 inject_css()
 render_sidebar()
+render_today_banner(extra_note="顧客 CUS001（ネクサス精機）向けデモ")
 
-# ---------------------------------------------------------------------------
-# Data loading
-# ---------------------------------------------------------------------------
+# ────────────────────────────────────────────────────────
+# データロード
+# ────────────────────────────────────────────────────────
 with st.spinner("データを読み込んでいます..."):
-    forecasts = get_silver_forecasts()
-    bom = get_silver_bom()
+    demand     = get_silver_demand_plan_components()
+    free_inv   = get_silver_macnica_free_inventory()
+    cust_inv   = get_silver_inventory_current()
+    options    = get_procurement_options()
     components = get_silver_components()
-    products = get_silver_products()
-    customers = get_silver_customers()
-    purchase_orders = get_silver_purchase_orders()
-    sales_orders = get_silver_sales_orders()
-    inventory_current = get_silver_inventory_current()
-    balance = get_balance_projection()
-    timeline = get_requirement_timeline()
+    pos        = get_silver_purchase_orders()
 
-# ---------------------------------------------------------------------------
-# Build risk DataFrames
-# ---------------------------------------------------------------------------
-fc_risk = build_forecast_risk_df(forecasts, bom, components, products, customers, purchase_orders)
-od_risk = build_order_delivery_risk_df(sales_orders)
-inv = build_inventory_df(inventory_current, components, sales_orders)
-mb = build_monthly_balance_df(balance)
-kpis = build_overview_kpis(fc_risk, od_risk, inv, mb)
+today = get_as_of_date()
 
-# ---------------------------------------------------------------------------
-# Title
-# ---------------------------------------------------------------------------
-st.markdown("## 📊 Overview")
-st.caption("リスクサマリーと優先対応事項")
+# ────────────────────────────────────────────────────────
+# タイトル
+# ────────────────────────────────────────────────────────
+st.markdown("## 📊 総合ダッシュボード")
+st.caption("今日の調達状況サマリーと優先対応事項")
 
-# ---------------------------------------------------------------------------
-# KPI Cards - Row 1
-# ---------------------------------------------------------------------------
-r1c1, r1c2, r1c3, r1c4 = st.columns(4)
-r1c1.metric("🔴 発注リスク Critical", kpis["forecast_critical"])
-r1c2.metric("🟠 発注リスク High", kpis["forecast_high"])
-r1c3.metric("🔴 納品リスク Critical", kpis["delivery_critical"])
-r1c4.metric("🟠 納品リスク High", kpis["delivery_high"])
+# ────────────────────────────────────────────────────────
+# KPI Row 1: 需要関連
+# ────────────────────────────────────────────────────────
+demand_total = len(demand)
+demand_emergency = int((demand["source_type"] == "EMERGENCY_MANUAL").sum()) if not demand.empty else 0
 
-# ---------------------------------------------------------------------------
-# KPI Cards - Row 2
-# ---------------------------------------------------------------------------
-r2c1, r2c2, r2c3, r2c4 = st.columns(4)
-r2c1.metric("📦 在庫不足品目", kpis["inventory_shortage"])
-r2c2.metric("⚠️ 在庫 Low 品目", kpis["inventory_low"])
-r2c3.metric("📉 不足月数", kpis["months_with_shortage"])
-r2c4.metric("⏰ 納期超過", kpis["delivery_overdue"])
+# 「今日以降30日以内に納期到来する需要」
+if not demand.empty:
+    req_dates = pd.to_datetime(demand["requested_date"], errors="coerce").dt.date
+    upcoming_30d = int(((req_dates >= today) & (req_dates <= today + pd.Timedelta(days=30).to_pytimedelta())).sum())
+    overdue = int((req_dates < today).sum())
+else:
+    upcoming_30d = 0
+    overdue = 0
+
+st.markdown("### 📋 需要サマリー")
+k1, k2, k3, k4 = st.columns(4)
+k1.metric("総需要件数", f"{demand_total:,} 件")
+k2.metric("🚨 緊急手動入力", f"{demand_emergency:,} 件")
+k3.metric("⏰ 30日以内に納期到来", f"{upcoming_30d:,} 件")
+k4.metric("🔴 既に納期超過", f"{overdue:,} 件")
 
 st.markdown("---")
 
-# ---------------------------------------------------------------------------
-# Top 10 tables
-# ---------------------------------------------------------------------------
-left, right = st.columns(2)
+# ────────────────────────────────────────────────────────
+# KPI Row 2: 在庫サマリー（種別を明確に分けて表示）
+# ────────────────────────────────────────────────────────
+st.markdown("### 📦 在庫サマリー")
+render_inventory_legend()
+st.markdown("")
 
-with left:
-    st.subheader("発注リスク Top 10")
-    fc_top = fc_risk[fc_risk["status"].isin(["Critical", "High"])].head(10)
-    display_cols_fc = [
-        c for c in ["customer_name", "part_number", "component_name", "days_remaining", "status"]
-        if c in fc_top.columns
-    ]
-    if not fc_top.empty:
-        st.dataframe(fc_top[display_cols_fc], hide_index=True, use_container_width=True)
-    else:
-        st.info("Critical / High の発注リスクはありません。")
+cust_total_qty = int(pd.to_numeric(cust_inv["stock_qty"], errors="coerce").fillna(0).sum()) if not cust_inv.empty else 0
+cust_components = int(cust_inv["component_id"].nunique()) if not cust_inv.empty else 0
 
-with right:
-    st.subheader("納品リスク Top 10")
-    od_top = od_risk[od_risk["delivery_status"].isin(["Critical", "High"])].head(10)
-    display_cols_od = [
-        c for c in ["sales_order_id", "customer_name", "days_to_delivery", "delivery_status"]
-        if c in od_top.columns
-    ]
-    if not od_top.empty:
-        st.dataframe(od_top[display_cols_od], hide_index=True, use_container_width=True)
-    else:
-        st.info("Critical / High の納品リスクはありません。")
+free_total_qty = int(pd.to_numeric(free_inv["qty_available"], errors="coerce").fillna(0).sum()) if not free_inv.empty else 0
+free_components = int(free_inv["component_id"].nunique()) if not free_inv.empty else 0
 
-# ---------------------------------------------------------------------------
-# Page links
-# ---------------------------------------------------------------------------
+i1, i2, i3, i4 = st.columns(4)
+i1.metric("🏭 顧客在庫 数量合計", f"{cust_total_qty:,} 個")
+i2.metric("🏭 顧客在庫 部材数", f"{cust_components} 品目")
+i3.metric("📦 マクニカフリー在庫 数量", f"{free_total_qty:,} 個")
+i4.metric("📦 マクニカフリー在庫 部材数", f"{free_components} 品目")
+
 st.markdown("---")
-st.markdown("##### 詳細ページ")
-lnk1, lnk2, lnk3, lnk4, lnk5 = st.columns(5)
-with lnk1:
-    st.page_link("pages/1_forecast_risk.py", label="📋 発注リスク", icon="📋")
-with lnk2:
-    st.page_link("pages/2_order_delivery_risk.py", label="🚚 納品リスク", icon="🚚")
-with lnk3:
-    st.page_link("pages/3_monthly_balance.py", label="📈 月次需給", icon="📈")
-with lnk4:
-    st.page_link("pages/4_inventory.py", label="📦 在庫確認", icon="📦")
-with lnk5:
-    st.page_link("pages/5_inbound_outbound.py", label="📝 入出庫", icon="📝")
+
+# ────────────────────────────────────────────────────────
+# 要対応リスト: 4ルート評価で「不足あり」のもの Top10
+# ────────────────────────────────────────────────────────
+st.markdown("### 🚨 要対応リスト（充足が見込めない需要 Top 10）")
+st.caption("各需要に対する4ルート評価で、最良ルートでも数量不足または納期遅延となるもの")
+
+if not options.empty:
+    # 需要ごとに「最良ルート（充足度+早さで判定）」を算出
+    opt = options.copy()
+    opt["shortage_qty"] = pd.to_numeric(opt["shortage_qty"], errors="coerce").fillna(0)
+    opt["days_late"] = pd.to_numeric(opt["days_late"], errors="coerce").fillna(0)
+    # ルートごとのスコア: 不足が少ないほど良い、遅延が少ないほど良い
+    opt["_score"] = opt["shortage_qty"].clip(lower=0) * 1000 + opt["days_late"]
+    best_route = opt.sort_values("_score").groupby("demand_id").first().reset_index()
+
+    # 「最良ルートでも shortage_qty>0 または days_late>0」の需要が要対応
+    needs_action = best_route[(best_route["shortage_qty"] > 0) | (best_route["days_late"] > 0)].copy()
+    needs_action = needs_action.sort_values(["shortage_qty", "days_late"], ascending=[False, False])
+
+    if needs_action.empty:
+        st.success("✅ 全需要が4ルート評価で充足見込みです。")
+    else:
+        # 部材名を結合
+        comp_lite = components[["component_id", "part_number", "component_name"]] if not components.empty else pd.DataFrame()
+        if not comp_lite.empty:
+            needs_action = needs_action.merge(comp_lite, on="component_id", how="left")
+
+        display_cols = [
+            ("demand_id",      "需要ID"),
+            ("part_number",    "品番"),
+            ("component_name", "部材名"),
+            ("requested_date", "希望納期"),
+            ("requested_qty",  "必要数"),
+            ("route_type",     "最良ルート"),
+            ("available_qty",  "確保可能数"),
+            ("shortage_qty",   "不足数"),
+            ("days_late",      "遅延日数"),
+        ]
+        cols_present = [(k, lbl) for k, lbl in display_cols if k in needs_action.columns]
+        df_show = needs_action[[k for k, _ in cols_present]].head(10).rename(columns=dict(cols_present))
+        st.dataframe(df_show, hide_index=True, use_container_width=True)
+        st.caption(f"💡 詳細評価は「🎯 調達アクションセンター」または「🚨 緊急調達シミュレーター」へ。要対応 {len(needs_action)} 件中、上位10件を表示。")
+else:
+    st.info("Goldテーブル `gold_procurement_options` がまだ生成されていません。Lakeflow パイプラインを実行してください。")
+
+st.markdown("---")
+
+# ────────────────────────────────────────────────────────
+# 詳細ページへの導線
+# ────────────────────────────────────────────────────────
+st.markdown("##### 📂 詳細ページ")
+ln1, ln2, ln3, ln4, ln5 = st.columns(5)
+with ln1:
+    st.page_link("pages/1_demand_timeline.py",        label="📅 FCST×部材", icon="📅")
+with ln2:
+    st.page_link("pages/2_action_center.py",          label="🎯 調達アクション", icon="🎯")
+with ln3:
+    st.page_link("pages/3_emergency_simulator.py",    label="🚨 緊急シミュ", icon="🚨")
+with ln4:
+    st.page_link("pages/4_macnica_free_inventory.py", label="📦 フリー在庫", icon="📦")
+with ln5:
+    st.page_link("pages/5_logistics_geo.py",          label="🚚 物流マップ", icon="🚚")

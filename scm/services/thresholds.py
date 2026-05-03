@@ -54,6 +54,7 @@ MONTHLY_BALANCE = {
 }
 
 # ══════════════════════════════════════════════════════
-# 共通: デモ基準日
+# 共通: デモ基準日 (config.py の get_as_of_date と整合させる)
 # ══════════════════════════════════════════════════════
-TODAY = "2026-03-31"
+from services.config import get_as_of_date as _get_as_of_date
+TODAY = _get_as_of_date().isoformat()
