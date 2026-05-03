@@ -160,3 +160,28 @@ def bronze_sales_orders():
 )
 def bronze_purchase_orders():
     return _read_csv("purchase_orders.csv")
+
+
+# ── 新規追加: マクニカフリー在庫 / 需要計画(部材レベル) ───
+@dlt.table(
+    name="bronze_macnica_free_inventory",
+    comment=(
+        "マクニカが顧客向けに引当済みの『フリー在庫』。"
+        "顧客側在庫 (bronze_inventory_current) とは別物。"
+        "free_inventory_id, component_id, warehouse_id, qty_available, as_of_date, allocated_to"
+    ),
+)
+def bronze_macnica_free_inventory():
+    return _read_csv("macnica_free_inventory.csv")
+
+
+@dlt.table(
+    name="bronze_demand_plan_components",
+    comment=(
+        "部材レベルの希望納期データ。"
+        "source_type=FCST_AUTO は製品FCST×BOM展開、EMERGENCY_MANUAL は緊急手動入力。"
+        "demand_id, component_id, requested_date, requested_qty, source_type, product_id, customer_id"
+    ),
+)
+def bronze_demand_plan_components():
+    return _read_csv("demand_plan_components.csv")

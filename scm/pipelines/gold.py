@@ -32,7 +32,7 @@ from pyspark.sql.types import (
     StructType, StructField, StringType, IntegerType, DoubleType
 )
 
-TODAY = spark.conf.get("scm.today_date", "2026-03-31")
+TODAY = spark.conf.get("scm.today_date", "2026-03-28")
 # End of the balance projection window (matches gold_builder.py line 315)
 PROJECTION_END = spark.conf.get("scm.projection_end_date", "2026-11-01")
 # Policy breach cutoff (6 months ahead, per gold_builder.py line 392)
@@ -871,3 +871,160 @@ def gold_genie_semantic_examples():
         StructField("notes",        StringType()),
     ])
     return spark.createDataFrame(GENIE_EXAMPLES, schema)
+
+
+# ══════════════════════════════════════════════════════
+# 15. gold_procurement_options ── 4ルート評価 (新Appのコア)
+# ══════════════════════════════════════════════════════
+# 各 demand (希望部材×希望納期×必要数量) に対し、以下4ルートで評価:
+#   ① CUSTOMER_STOCK   顧客側在庫        (silver_inventory_current)
+#   ② MACNICA_FREE     マクニカフリー在庫 (silver_macnica_free_inventory)
+#   ③ EXISTING_PO      既存発注残BL      (silver_purchase_orders.outstanding_qty)
+#   ④ NEW_ORDER        新規追加発注      (silver_components.base_lead_time_weeks)
+#
+# 各ルートで以下を算出:
+#   - available_qty: そのルートで確保可能な数量
+#   - eta_date:      到着予定日
+#   - confidence:    確実 / 見込み / 要相談
+#   - shortage_qty:  requested_qty に対する不足数量 (負値は余剰)
+@dlt.table(
+    name="gold_procurement_options",
+    comment=(
+        "需要 (silver_demand_plan_components) に対する4つの調達ルートの評価結果。"
+        "1需要あたり最大4行 (route_type別)。Streamlit UI の調達アクションセンター/緊急調達"
+        "シミュレーターのコアデータ。"
+    ),
+)
+def gold_procurement_options():
+    today = F.to_date(F.lit(TODAY))
+
+    # 需要側
+    demand = dlt.read("silver_demand_plan_components").select(
+        F.col("demand_id"),
+        F.col("component_id"),
+        F.col("requested_date"),
+        F.col("requested_qty"),
+        F.col("source_type"),
+        F.col("product_id"),
+        F.col("customer_id"),
+    )
+
+    # ── ① CUSTOMER_STOCK: 顧客側在庫 ──
+    cust_stock = (
+        dlt.read("silver_inventory_current")
+        .groupBy("component_id")
+        .agg(F.sum(F.coalesce(F.col("stock_qty"), F.lit(0))).alias("avail"))
+    )
+    route_customer = (
+        demand.join(cust_stock, "component_id", "left")
+        .select(
+            F.col("demand_id"),
+            F.col("component_id"),
+            F.col("requested_date"),
+            F.col("requested_qty"),
+            F.lit("CUSTOMER_STOCK").alias("route_type"),
+            F.coalesce(F.col("avail"), F.lit(0)).cast("int").alias("available_qty"),
+            today.alias("eta_date"),
+            F.lit("確実").alias("confidence"),
+            F.lit("顧客側倉庫の引当可能在庫").alias("note"),
+        )
+    )
+
+    # ── ② MACNICA_FREE: マクニカフリー在庫 ──
+    free_stock = (
+        dlt.read("silver_macnica_free_inventory")
+        .groupBy("component_id")
+        .agg(F.sum(F.coalesce(F.col("qty_available"), F.lit(0))).alias("avail"))
+    )
+    # マクニカ→顧客の輸送日数 (デモなので固定3日)
+    MACNICA_TRANSIT_DAYS = 3
+    route_macnica = (
+        demand.join(free_stock, "component_id", "left")
+        .select(
+            F.col("demand_id"),
+            F.col("component_id"),
+            F.col("requested_date"),
+            F.col("requested_qty"),
+            F.lit("MACNICA_FREE").alias("route_type"),
+            F.coalesce(F.col("avail"), F.lit(0)).cast("int").alias("available_qty"),
+            F.date_add(today, MACNICA_TRANSIT_DAYS).alias("eta_date"),
+            F.lit("確実").alias("confidence"),
+            F.lit("マクニカが顧客向け引当済の在庫から出荷").alias("note"),
+        )
+    )
+
+    # ── ③ EXISTING_PO: 既存発注残BL ──
+    # 部材ごとに「未入荷数量の合計」と「最早到着予定日」を集計
+    po = (
+        dlt.read("silver_purchase_orders")
+        .filter(F.col("outstanding_qty") > 0)
+        .filter(F.col("expected_delivery_date") >= today)
+    )
+    po_agg = po.groupBy("component_id").agg(
+        F.sum("outstanding_qty").alias("avail"),
+        F.min("expected_delivery_date").alias("earliest_eta"),
+        F.max(F.col("is_delayed").cast("int")).alias("any_delayed"),
+    )
+    route_po = (
+        demand.join(po_agg, "component_id", "left")
+        .select(
+            F.col("demand_id"),
+            F.col("component_id"),
+            F.col("requested_date"),
+            F.col("requested_qty"),
+            F.lit("EXISTING_PO").alias("route_type"),
+            F.coalesce(F.col("avail"), F.lit(0)).cast("int").alias("available_qty"),
+            F.col("earliest_eta").alias("eta_date"),
+            F.when(F.col("any_delayed") == 1, F.lit("要相談"))
+            .otherwise(F.lit("見込み"))
+            .alias("confidence"),
+            F.when(
+                F.col("any_delayed") == 1,
+                F.lit("既存発注に遅延あり、メーカー納期確認要"),
+            )
+            .otherwise(F.lit("既存発注残BLからの催促"))
+            .alias("note"),
+        )
+    )
+
+    # ── ④ NEW_ORDER: 新規追加発注 ──
+    # base_lead_time_weeks * 7 日後に到着可能と仮定
+    comp_lt = dlt.read("silver_components").select(
+        F.col("component_id"),
+        F.col("base_lead_time_weeks"),
+    )
+    route_new = (
+        demand.join(comp_lt, "component_id", "left")
+        .select(
+            F.col("demand_id"),
+            F.col("component_id"),
+            F.col("requested_date"),
+            F.col("requested_qty"),
+            F.lit("NEW_ORDER").alias("route_type"),
+            # 新規発注は数量上限なしと仮定 (要求数量を満たせる)
+            F.col("requested_qty").alias("available_qty"),
+            F.date_add(today, F.coalesce(F.col("base_lead_time_weeks"), F.lit(20)) * 7).alias("eta_date"),
+            F.lit("要相談").alias("confidence"),
+            F.lit("新規追加発注 (LT考慮、メーカー納期確認要)").alias("note"),
+        )
+    )
+
+    # ── 4ルートを縦結合し、不足数量を派生列で算出 ──
+    options = (
+        route_customer.unionByName(route_macnica)
+        .unionByName(route_po)
+        .unionByName(route_new)
+    )
+    return options.withColumn(
+        "shortage_qty",
+        (F.col("requested_qty") - F.col("available_qty")).cast("int"),
+    ).withColumn(
+        "is_in_time",
+        F.col("eta_date") <= F.col("requested_date"),
+    ).withColumn(
+        "days_late",
+        F.when(
+            F.col("eta_date") > F.col("requested_date"),
+            F.datediff(F.col("eta_date"), F.col("requested_date")),
+        ).otherwise(F.lit(0)),
+    )

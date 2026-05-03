@@ -16,7 +16,7 @@ lineage in Unity Catalog automatically.
 import dlt
 from pyspark.sql import functions as F
 
-TODAY = spark.conf.get("scm.today_date", "2026-03-31")
+TODAY = spark.conf.get("scm.today_date", "2026-03-28")
 
 
 # ══════════════════════════════════════════════════════
@@ -362,4 +362,61 @@ def silver_purchase_orders():
         F.col("total_cost_usd").cast("double").alias("total_cost_usd"),
     ).withColumn(
         "days_to_expected", F.datediff(F.col("expected_delivery_date"), today)
+    )
+
+
+# ══════════════════════════════════════════════════════
+# 新規追加: マクニカフリー在庫 / 需要計画 (部材レベル)
+# ══════════════════════════════════════════════════════
+@dlt.table(
+    name="silver_macnica_free_inventory",
+    comment=(
+        "マクニカが顧客向けに引当済みの『フリー在庫』。"
+        "顧客側在庫 (silver_inventory_current) とは保有者が異なるため明確に分離する。"
+        "qty_available > 0 の有効引当のみ保持。"
+    ),
+)
+@dlt.expect_or_drop("free_inv_id_not_null", "free_inventory_id IS NOT NULL")
+@dlt.expect_or_drop("free_inv_qty_positive", "qty_available > 0")
+@dlt.expect("free_inv_allocated_to_present", "allocated_to IS NOT NULL")
+def silver_macnica_free_inventory():
+    return dlt.read("bronze_macnica_free_inventory").select(
+        F.col("free_inventory_id").cast("string").alias("free_inventory_id"),
+        F.col("component_id").cast("string").alias("component_id"),
+        F.col("warehouse_id").cast("string").alias("warehouse_id"),
+        F.col("qty_available").cast("int").alias("qty_available"),
+        F.to_date(F.col("as_of_date")).alias("as_of_date"),
+        F.col("allocated_to").cast("string").alias("allocated_to"),
+        F.col("note").cast("string").alias("note"),
+        F.current_timestamp().alias("updated_at"),
+    )
+
+
+@dlt.table(
+    name="silver_demand_plan_components",
+    comment=(
+        "部材レベルの希望納期データ。requested_date / requested_qty を派生列で意味付け。"
+        "source_type=FCST_AUTO は製品FCST×BOM自動展開、EMERGENCY_MANUAL は緊急手動入力。"
+        "days_to_required = 希望納期までの残日数 (負値は遅延)。"
+    ),
+)
+@dlt.expect_or_drop("demand_id_not_null", "demand_id IS NOT NULL")
+@dlt.expect_or_drop("demand_qty_positive", "requested_qty > 0")
+@dlt.expect("demand_source_valid", "source_type IN ('FCST_AUTO', 'EMERGENCY_MANUAL')")
+def silver_demand_plan_components():
+    today = F.to_date(F.lit(TODAY))
+    return dlt.read("bronze_demand_plan_components").select(
+        F.col("demand_id").cast("string").alias("demand_id"),
+        F.col("component_id").cast("string").alias("component_id"),
+        F.to_date(F.col("requested_date")).alias("requested_date"),
+        F.col("requested_qty").cast("int").alias("requested_qty"),
+        F.col("source_type").cast("string").alias("source_type"),
+        F.col("product_id").cast("string").alias("product_id"),
+        F.col("customer_id").cast("string").alias("customer_id"),
+        F.to_date(F.col("created_at")).alias("created_at"),
+        F.col("note").cast("string").alias("note"),
+    ).withColumn(
+        "days_to_required", F.datediff(F.col("requested_date"), today)
+    ).withColumn(
+        "is_emergency", F.col("source_type") == F.lit("EMERGENCY_MANUAL")
     )

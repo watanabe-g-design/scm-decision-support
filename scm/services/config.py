@@ -3,12 +3,44 @@
 ================================
 - Apps 環境変数 (SCM_CATALOG, SCM_SCHEMA, SCM_WAREHOUSE_ID, SCM_GENIE_SPACE_ID) から読み込む
 - Volume 上の config.json があれば、env で未設定の項目を補完
+- AS_OF_DATE: デモの「今日」を統一管理 (デフォルト 2026-03-15)
 """
 import json
 import os
+from datetime import date
 from functools import lru_cache
 
 _VOLUME_BASE = "/Volumes/{catalog}/{schema}/scm_data"
+
+# ══════════════════════════════════════════════════════
+# デモの「今日」を統一管理
+# ══════════════════════════════════════════════════════
+# データ分布:
+#   FCST: 2023-01 〜 2026-10
+#   受注: 2026-02-26 〜 2026-03-27 (受注日)
+#   発注予定到着: 2026-02-13 〜 2026-10-15
+# データ生成スクリプト (data_generation/gen_full.py) の TODAY = 2026-03-28 と整合させる
+# → 過去実績 約3年強、未来予測 約7ヶ月、受注は全て発注済みとして表示される
+_DEFAULT_AS_OF_DATE = date(2026, 3, 28)
+
+
+def get_as_of_date() -> date:
+    """デモの「今日」を返す。SCM_AS_OF_DATE 環境変数で上書き可能 (YYYY-MM-DD)"""
+    env_val = os.environ.get("SCM_AS_OF_DATE", "").strip()
+    if env_val:
+        try:
+            from datetime import datetime
+            return datetime.strptime(env_val, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    return _DEFAULT_AS_OF_DATE
+
+
+def get_as_of_date_label_jp() -> str:
+    """日本語表記の「今日」ラベルを返す。例: '2026年3月15日（日）'"""
+    d = get_as_of_date()
+    weekdays = ["月", "火", "水", "木", "金", "土", "日"]
+    return f"{d.year}年{d.month}月{d.day}日（{weekdays[d.weekday()]}）"
 
 
 @lru_cache(maxsize=1)

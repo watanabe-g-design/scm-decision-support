@@ -132,6 +132,16 @@ def get_silver_products():              return _load_table("silver_products")
 def get_silver_customers():             return _load_table("silver_customers")
 def get_silver_logistics():             return _load_table("silver_logistics")
 
+# ── 新規追加: マクニカフリー在庫 / 需要計画 (部材レベル) ──
+def get_silver_macnica_free_inventory():     return _load_table("silver_macnica_free_inventory")
+def get_silver_demand_plan_components():     return _load_table("silver_demand_plan_components")
+
+
+# ══════════════════════════════════════════════════════
+# 公開 API: 新Goldテーブル (調達4ルート評価)
+# ══════════════════════════════════════════════════════
+def get_procurement_options():               return _load_table("gold_procurement_options")
+
 
 # ── 後方互換: 旧 get_shipment_routes ──
 def get_shipment_routes():
