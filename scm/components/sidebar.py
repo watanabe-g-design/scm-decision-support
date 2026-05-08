@@ -12,6 +12,7 @@
 import streamlit as st
 
 from services.config import get_as_of_date_label_jp
+from components.theme_toggle import render_theme_toggle
 
 
 def render_sidebar():
@@ -19,8 +20,8 @@ def render_sidebar():
     with st.sidebar:
         st.markdown(
             """<div style="padding:4px 0 12px 0;">
-            <div style="font-size:15px;font-weight:700;color:#e6edf3;">SCM 調達意思決定支援</div>
-            <div style="font-size:10px;color:#8b949e;">Customer Procurement Decision App</div>
+            <div style="font-size:15px;font-weight:700;">SCM 調達意思決定支援</div>
+            <div style="font-size:10px;opacity:0.7;">Customer Procurement Decision App</div>
         </div>""",
             unsafe_allow_html=True,
         )
@@ -36,10 +37,15 @@ def render_sidebar():
         st.page_link("pages/3_emergency_simulator.py",         label="🚨 緊急調達シミュレーター")
         st.page_link("pages/4_macnica_free_inventory.py",      label="📦 マクニカフリー在庫")
         st.page_link("pages/5_logistics_geo.py",               label="🚚 物流トラッキング")
+        st.page_link("pages/6_bom_fulfillment.py",             label="🧩 製品BOM充足ビュー")
+
+        st.markdown("---")
+        st.caption("🎨 表示モード")
+        render_theme_toggle()
 
         st.markdown("---")
         st.markdown(
-            """<div style="font-size:10px;color:#8b949e;line-height:1.5;">
+            """<div style="font-size:10px;opacity:0.7;line-height:1.5;">
                 <b>このアプリは</b><br>
                 顧客（購買担当）と<br>マクニカ営業が<br>
                 同じ画面で意思決定<br>するための統合UIです。

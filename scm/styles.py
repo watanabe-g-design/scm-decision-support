@@ -1,11 +1,15 @@
 """
-SCMデモアプリ用 ダークテーマCSS
-GeoGenieのスタイリングを踏襲
+SCMデモアプリ用 テーマCSS（ダーク / ライト切替対応）
+=========================================================
+GitHub-style ダーク + 業務向けライトテーマの2系統を提供。
+セッションステート ``theme_mode`` で切替可能。
 """
 
+# ════════════════════════════════════════════════════════
+# ダークテーマ (デフォルト)
+# ════════════════════════════════════════════════════════
 DARK_THEME_CSS = """
 <style>
-/* ── Foundation ───────────────────────────── */
 :root {
     --bg-primary: #0d1117;
     --bg-secondary: #161b22;
@@ -18,8 +22,38 @@ DARK_THEME_CSS = """
     --accent-orange: #ffa000;
     --accent-red: #ff4646;
     --accent-purple: #bc8cff;
+    --plot-bg: #0d1117;
 }
+</style>
+"""
 
+# ════════════════════════════════════════════════════════
+# ライトテーマ (業務文書向け)
+# ════════════════════════════════════════════════════════
+LIGHT_THEME_CSS = """
+<style>
+:root {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f6f8fa;
+    --bg-tertiary: #eaeef2;
+    --border: #d0d7de;
+    --text-primary: #1f2328;
+    --text-secondary: #656d76;
+    --accent-blue: #0969da;
+    --accent-green: #1a7f37;
+    --accent-orange: #bf8700;
+    --accent-red: #cf222e;
+    --accent-purple: #8250df;
+    --plot-bg: #ffffff;
+}
+</style>
+"""
+
+# ════════════════════════════════════════════════════════
+# 共通スタイル (両テーマで共通利用、CSS変数を参照)
+# ════════════════════════════════════════════════════════
+COMMON_CSS = """
+<style>
 /* 背景・テキスト基本設定 */
 .stApp, [data-testid="stAppViewContainer"],
 [data-testid="stHeader"],
@@ -28,7 +62,6 @@ section[data-testid="stSidebar"] {
     color: var(--text-primary) !important;
 }
 
-/* Streamlit ヘッダー・フッター非表示 */
 header[data-testid="stHeader"] {
     background: var(--bg-primary) !important;
     border-bottom: 1px solid var(--border) !important;
@@ -47,7 +80,6 @@ section[data-testid="stSidebar"] span {
     color: var(--text-primary) !important;
 }
 
-/* サイドバーのナビゲーション */
 [data-testid="stSidebarNavItems"] a {
     color: var(--text-secondary) !important;
     border-radius: 6px !important;
@@ -73,10 +105,7 @@ section[data-testid="stSidebar"] span {
     border-bottom: 1px solid var(--border);
     margin-bottom: 20px;
 }
-.title-bar .logo {
-    font-size: 28px;
-    line-height: 1;
-}
+.title-bar .logo { font-size: 28px; line-height: 1; }
 .title-bar .title {
     font-size: 22px;
     font-weight: 700;
@@ -132,14 +161,6 @@ section[data-testid="stSidebar"] span {
     background: var(--bg-tertiary) !important;
     border-color: var(--accent-blue) !important;
 }
-.stDownloadButton > button {
-    background: rgba(88,166,255,0.1) !important;
-    color: var(--accent-blue) !important;
-    border: 1px solid rgba(88,166,255,0.3) !important;
-}
-.stDownloadButton > button:hover {
-    background: rgba(88,166,255,0.18) !important;
-}
 
 /* ── タブ ─────────────────────────────────── */
 .stTabs [data-baseweb="tab-list"] {
@@ -162,10 +183,6 @@ section[data-testid="stSidebar"] span {
 }
 
 /* ── セレクトボックス / マルチセレクト ─────── */
-[data-testid="stMultiSelect"],
-[data-testid="stSelectbox"] {
-    background: var(--bg-secondary) !important;
-}
 .stSelectbox > div > div,
 .stMultiSelect > div > div {
     background: var(--bg-secondary) !important;
@@ -214,7 +231,7 @@ hr {
     margin: 16px 0 !important;
 }
 
-/* ── チャット入力 (Genie用) ────────────────── */
+/* ── チャット入力 ────────────────────────── */
 [data-testid="stChatInput"] textarea {
     background: var(--bg-secondary) !important;
     color: var(--text-primary) !important;
@@ -223,56 +240,64 @@ hr {
 }
 
 /* ── スクロールバー ───────────────────────── */
-::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-}
-::-webkit-scrollbar-track {
-    background: var(--bg-primary);
-}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
 ::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: 3px;
 }
-::-webkit-scrollbar-thumb:hover {
-    background: var(--text-secondary);
-}
-
-/* ── Genieパネル ──────────────────────────── */
-.genie-panel {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px;
-    margin: 12px 0;
-}
-.genie-panel .panel-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--accent-purple);
-    margin-bottom: 10px;
-}
-.genie-pill {
-    display: inline-block;
-    background: rgba(188,140,255,0.08);
-    color: var(--accent-purple);
-    border: 1px solid rgba(188,140,255,0.2);
-    border-radius: 16px;
-    padding: 4px 12px;
-    font-size: 11px;
-    margin: 3px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-.genie-pill:hover {
-    background: rgba(188,140,255,0.16);
-    border-color: var(--accent-purple);
-}
+::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 </style>
 """
 
 
-def inject_css():
-    """Streamlitページにダークテーマを注入"""
+def get_theme_mode() -> str:
+    """セッションステートからテーマモードを取得 (デフォルト: dark)"""
     import streamlit as st
-    st.markdown(DARK_THEME_CSS, unsafe_allow_html=True)
+    return st.session_state.get("theme_mode", "dark")
+
+
+def is_light_theme() -> bool:
+    return get_theme_mode() == "light"
+
+
+def inject_css():
+    """Streamlit ページに現在テーマのCSSを注入"""
+    import streamlit as st
+    theme = get_theme_mode()
+    if theme == "light":
+        st.markdown(LIGHT_THEME_CSS, unsafe_allow_html=True)
+    else:
+        st.markdown(DARK_THEME_CSS, unsafe_allow_html=True)
+    st.markdown(COMMON_CSS, unsafe_allow_html=True)
+
+
+# ════════════════════════════════════════════════════════
+# Plotly 用カラー (テーマで切替)
+# ════════════════════════════════════════════════════════
+def plot_colors() -> dict:
+    """Plotly チャートで使う色をテーマに合わせて返す"""
+    if is_light_theme():
+        return {
+            "bg":        "#ffffff",
+            "paper":     "#ffffff",
+            "text":      "#1f2328",
+            "grid":      "#d0d7de",
+            "blue":      "#0969da",
+            "green":     "#1a7f37",
+            "orange":    "#bf8700",
+            "red":       "#cf222e",
+            "purple":    "#8250df",
+        }
+    else:
+        return {
+            "bg":        "#0d1117",
+            "paper":     "#0d1117",
+            "text":      "#e6edf3",
+            "grid":      "#30363d",
+            "blue":      "#58a6ff",
+            "green":     "#2ea043",
+            "orange":    "#ffa000",
+            "red":       "#ff4646",
+            "purple":    "#bc8cff",
+        }

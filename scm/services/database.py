@@ -138,9 +138,10 @@ def get_silver_demand_plan_components():     return _load_table("silver_demand_p
 
 
 # ══════════════════════════════════════════════════════
-# 公開 API: 新Goldテーブル (調達4ルート評価)
+# 公開 API: 新Goldテーブル (調達4ルート評価 / BOM充足)
 # ══════════════════════════════════════════════════════
 def get_procurement_options():               return _load_table("gold_procurement_options")
+def get_bom_fulfillment_status():            return _load_table("gold_bom_fulfillment_status")
 
 
 # ── 後方互換: 旧 get_shipment_routes ──

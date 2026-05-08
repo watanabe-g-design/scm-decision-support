@@ -14,38 +14,43 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+from styles import is_light_theme
+
 
 # ルートタイプの日本語ラベル + 色
 ROUTE_META: dict[str, dict[str, str]] = {
     "CUSTOMER_STOCK": {
         "label_jp": "① 顧客側在庫",
-        "color":    "#58a6ff",   # 青
+        "color":    "#58a6ff",
         "icon":     "🏭",
-        "desc":     "自社倉庫の在庫から引当",
+        "desc":     "自社倉庫の在庫から引当（即時）",
+        "tooltip":  "顧客の自社倉庫が現在保有している在庫。今日すぐ利用可能。今後の他需要による消費見込みを差し引いた『実効在庫』を表示。",
     },
     "MACNICA_FREE": {
         "label_jp": "② マクニカフリー在庫",
-        "color":    "#2ea043",   # 緑
+        "color":    "#2ea043",
         "icon":     "📦",
         "desc":     "マクニカが顧客向けに引当済の在庫",
+        "tooltip":  "マクニカ側がこの顧客向けに事前に引当済の在庫。マクニカ営業に相談すれば通常LTを待たずに出荷手配可能。",
     },
     "EXISTING_PO": {
         "label_jp": "③ 既存発注残BL",
-        "color":    "#ffa000",   # オレンジ
+        "color":    "#ffa000",
         "icon":     "📑",
-        "desc":     "マクニカからメーカーへの既存発注を催促",
+        "desc":     "マクニカからメーカーへ既発注分を催促",
+        "tooltip":  "マクニカが既にメーカーへ発注済の未入荷分。最早の入荷予定日を表示。遅延がある場合は『要相談』表示。",
     },
     "NEW_ORDER": {
         "label_jp": "④ 新規追加発注",
-        "color":    "#bc8cff",   # 紫
+        "color":    "#bc8cff",
         "icon":     "🆕",
-        "desc":     "新規にメーカーへ追加発注 (LT考慮)",
+        "desc":     "新規にメーカーへ追加発注（LT考慮）",
+        "tooltip":  "今から追加でメーカーへ発注する場合のオプション。部材ごとのリードタイム（base_lead_time_weeks）を考慮したETAを表示。",
     },
 }
 
 
 def _confidence_badge(confidence: str) -> str:
-    """確実度をHTMLバッジに変換"""
     color_map = {
         "確実":   "#2ea043",
         "見込み": "#ffa000",
@@ -59,47 +64,55 @@ def _confidence_badge(confidence: str) -> str:
     )
 
 
+def render_route_legend() -> None:
+    """4ルートの説明凡例を描画 (各ページ冒頭で1度呼ぶ)"""
+    with st.expander("ℹ️ 4つの調達ルートの説明", expanded=False):
+        for k, meta in ROUTE_META.items():
+            st.markdown(
+                f"<div style='margin-bottom:6px;'>"
+                f"<span style='color:{meta['color']};font-weight:600;'>{meta['icon']} {meta['label_jp']}</span>"
+                f": {meta['tooltip']}"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+
 def render_route_comparison(
     options_df: pd.DataFrame,
     requested_qty: int,
     requested_date: date,
 ) -> None:
-    """
-    4ルート比較を縦4枚カードで描画する。
-
-    Parameters
-    ----------
-    options_df : pd.DataFrame
-        gold_procurement_options を1需要に絞ったもの。
-        必須列: route_type, available_qty, eta_date, confidence,
-                shortage_qty, is_in_time, days_late, note
-    requested_qty : int
-        要求数量（カード上部に再表示）
-    requested_date : date
-        希望納期（カード上部に再表示）
-    """
-    # ルート順序を ROUTE_META のキー順に固定
+    """4ルート比較を縦4枚カードで描画"""
     df = options_df.copy()
-    df["_order"] = df["route_type"].map(
-        {k: i for i, k in enumerate(ROUTE_META.keys())}
-    )
+    df["_order"] = df["route_type"].map({k: i for i, k in enumerate(ROUTE_META.keys())})
     df = df.sort_values("_order").drop(columns="_order")
 
-    # 要求情報のサマリ
+    # テーマカラー
+    if is_light_theme():
+        card_bg = "#f6f8fa"
+        border = "#d0d7de"
+        text_main = "#1f2328"
+        text_sub = "#656d76"
+    else:
+        card_bg = "#1c2128"
+        border = "#30363d"
+        text_main = "#e6edf3"
+        text_sub = "#8b949e"
+
     st.markdown(
         f"""
         <div style="
-            background:#161b22;
-            border:1px solid #30363d;
+            background:{card_bg};
+            border:1px solid {border};
             padding:10px 14px;
             border-radius:6px;
             margin-bottom:14px;
         ">
-            <span style="font-size:12px;color:#8b949e;">要求</span>
-            <span style="font-size:14px;color:#e6edf3;margin-left:10px;">
+            <span style="font-size:12px;color:{text_sub};">要求</span>
+            <span style="font-size:14px;color:{text_main};margin-left:10px;">
                 必要数量 <b>{requested_qty:,}</b> 個
             </span>
-            <span style="font-size:14px;color:#e6edf3;margin-left:18px;">
+            <span style="font-size:14px;color:{text_main};margin-left:18px;">
                 希望納期 <b>{requested_date.isoformat()}</b>
             </span>
         </div>
@@ -107,7 +120,6 @@ def render_route_comparison(
         unsafe_allow_html=True,
     )
 
-    # 4列でカード表示
     cols = st.columns(4)
     for col, (_, row) in zip(cols, df.iterrows()):
         meta = ROUTE_META.get(row["route_type"], {})
@@ -125,7 +137,6 @@ def render_route_comparison(
         days_late = int(row.get("days_late", 0) or 0)
         note = str(row.get("note", "") or "")
 
-        # 充足判定アイコン
         if shortage <= 0 and is_in_time:
             status_icon = "🟢"
             status_text = "充足"
@@ -143,37 +154,37 @@ def render_route_comparison(
             st.markdown(
                 f"""
                 <div style="
-                    background:#1c2128;
-                    border:1px solid #30363d;
+                    background:{card_bg};
+                    border:1px solid {border};
                     border-top:3px solid {color};
                     border-radius:6px;
                     padding:14px;
                     height:100%;
-                    min-height:230px;
+                    min-height:240px;
                 ">
                     <div style="font-size:13px;font-weight:700;color:{color};margin-bottom:4px;">
                         {icon} {label}
                     </div>
-                    <div style="font-size:10px;color:#8b949e;margin-bottom:12px;">
+                    <div style="font-size:10px;color:{text_sub};margin-bottom:12px;">
                         {desc}
                     </div>
-                    <div style="font-size:11px;color:#8b949e;">確保可能数量</div>
-                    <div style="font-size:22px;font-weight:700;color:#e6edf3;line-height:1.1;">
-                        {avail:,}<span style="font-size:11px;color:#8b949e;"> 個</span>
+                    <div style="font-size:11px;color:{text_sub};">確保可能数量</div>
+                    <div style="font-size:22px;font-weight:700;color:{text_main};line-height:1.1;">
+                        {avail:,}<span style="font-size:11px;color:{text_sub};"> 個</span>
                     </div>
-                    <div style="font-size:11px;color:#8b949e;margin-top:10px;">到着予定日</div>
-                    <div style="font-size:14px;color:#e6edf3;font-weight:600;">{eta_str}</div>
+                    <div style="font-size:11px;color:{text_sub};margin-top:10px;">到着予定日</div>
+                    <div style="font-size:14px;color:{text_main};font-weight:600;">{eta_str}</div>
                     <div style="margin-top:10px;">{_confidence_badge(confidence)}</div>
                     <div style="
                         margin-top:10px;
                         padding-top:8px;
-                        border-top:1px solid #30363d;
+                        border-top:1px solid {border};
                         font-size:12px;
-                        color:#e6edf3;
+                        color:{text_main};
                     ">
                         {status_icon} {status_text}
                     </div>
-                    <div style="font-size:10px;color:#8b949e;margin-top:6px;font-style:italic;">
+                    <div style="font-size:10px;color:{text_sub};margin-top:6px;font-style:italic;">
                         {note}
                     </div>
                 </div>

@@ -77,6 +77,37 @@ if not warehouses.empty:
     )
 
 # ────────────────────────────────────────────────────────
+# フィルター
+# ────────────────────────────────────────────────────────
+st.markdown("### 🔍 フィルター")
+fc1, fc2, fc3 = st.columns(3)
+
+with fc1:
+    cat_options = ["（すべて）"] + sorted([c for c in free["component_category"].dropna().unique()])
+    sel_cat = st.selectbox("部材カテゴリ", cat_options)
+
+with fc2:
+    wh_options = ["（すべて）"] + sorted([w for w in free["warehouse_name"].dropna().unique()])
+    sel_wh = st.selectbox("保管倉庫", wh_options)
+
+with fc3:
+    qty_threshold = st.number_input("最低引当数量 (これ以上)", min_value=0, value=0, step=10)
+
+# 適用
+if sel_cat != "（すべて）":
+    free = free[free["component_category"] == sel_cat]
+if sel_wh != "（すべて）":
+    free = free[free["warehouse_name"] == sel_wh]
+if qty_threshold > 0:
+    free = free[free["qty_available"] >= qty_threshold]
+
+if free.empty:
+    st.info("条件に該当する引当がありません。フィルターを調整してください。")
+    st.stop()
+
+st.markdown("---")
+
+# ────────────────────────────────────────────────────────
 # KPI
 # ────────────────────────────────────────────────────────
 k1, k2, k3, k4 = st.columns(4)

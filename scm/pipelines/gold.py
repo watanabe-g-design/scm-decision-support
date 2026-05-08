@@ -909,24 +909,63 @@ def gold_procurement_options():
         F.col("customer_id"),
     )
 
-    # ── ① CUSTOMER_STOCK: 顧客側在庫 ──
+    # ── ① CUSTOMER_STOCK: 顧客側在庫 (今後の消費予測を反映) ──
+    # 現在の在庫合計
     cust_stock = (
         dlt.read("silver_inventory_current")
         .groupBy("component_id")
-        .agg(F.sum(F.coalesce(F.col("stock_qty"), F.lit(0))).alias("avail"))
+        .agg(F.sum(F.coalesce(F.col("stock_qty"), F.lit(0))).alias("current_stock"))
     )
+
+    # 各部材で「需要日(requested_date)時点までに発生する他需要の累積消費量」を計算
+    # → 自分自身を除く、同一部材の他のFCST_AUTO需要のうち requested_date より前のものを合算
+    other_demands = (
+        dlt.read("silver_demand_plan_components")
+        .filter(F.col("source_type") == "FCST_AUTO")
+        .select(
+            F.col("demand_id").alias("other_demand_id"),
+            F.col("component_id"),
+            F.col("requested_date").alias("other_req_date"),
+            F.col("requested_qty").alias("other_req_qty"),
+        )
+    )
+    consumption = (
+        demand.alias("d")
+        .join(other_demands.alias("o"),
+              (F.col("d.component_id") == F.col("o.component_id"))
+              & (F.col("o.other_demand_id") != F.col("d.demand_id"))
+              & (F.col("o.other_req_date") <= F.col("d.requested_date")),
+              "left")
+        .groupBy("d.demand_id")
+        .agg(F.coalesce(F.sum("o.other_req_qty"), F.lit(0)).cast("int").alias("projected_consumption"))
+    )
+
     route_customer = (
         demand.join(cust_stock, "component_id", "left")
+        .join(consumption, "demand_id", "left")
+        .withColumn(
+            "_effective_qty",
+            F.greatest(
+                F.lit(0),
+                F.coalesce(F.col("current_stock"), F.lit(0)) - F.coalesce(F.col("projected_consumption"), F.lit(0)),
+            ),
+        )
         .select(
             F.col("demand_id"),
             F.col("component_id"),
             F.col("requested_date"),
             F.col("requested_qty"),
             F.lit("CUSTOMER_STOCK").alias("route_type"),
-            F.coalesce(F.col("avail"), F.lit(0)).cast("int").alias("available_qty"),
+            F.col("_effective_qty").cast("int").alias("available_qty"),
             today.alias("eta_date"),
             F.lit("確実").alias("confidence"),
-            F.lit("顧客側倉庫の引当可能在庫").alias("note"),
+            F.concat(
+                F.lit("顧客側在庫 (現在 "),
+                F.coalesce(F.col("current_stock"), F.lit(0)).cast("string"),
+                F.lit(" - 同部材の予定消費 "),
+                F.coalesce(F.col("projected_consumption"), F.lit(0)).cast("string"),
+                F.lit(" = 実効在庫)"),
+            ).alias("note"),
         )
     )
 
@@ -1015,7 +1054,7 @@ def gold_procurement_options():
         .unionByName(route_po)
         .unionByName(route_new)
     )
-    return options.withColumn(
+    options = options.withColumn(
         "shortage_qty",
         (F.col("requested_qty") - F.col("available_qty")).cast("int"),
     ).withColumn(
@@ -1028,3 +1067,137 @@ def gold_procurement_options():
             F.datediff(F.col("eta_date"), F.col("requested_date")),
         ).otherwise(F.lit(0)),
     )
+
+    # ── 需要単位で「単一ルート充足の可否」「組合せ充足の可否」を集計 ──
+    # 単一ルート充足: 4ルートのいずれか一つで shortage<=0 かつ is_in_time のものがあれば「単独充足可」
+    single_ok = options.groupBy("demand_id").agg(
+        F.max(
+            F.when(
+                (F.col("shortage_qty") <= 0) & (F.col("is_in_time")),
+                F.lit(1)
+            ).otherwise(F.lit(0))
+        ).alias("any_single_route_ok"),
+        F.max(
+            F.when(
+                (F.col("route_type") == "CUSTOMER_STOCK") & (F.col("shortage_qty") <= 0),
+                F.lit(1)
+            ).otherwise(F.lit(0))
+        ).alias("customer_stock_alone_ok"),
+    )
+
+    # 組合せ充足: 全ルート available_qty 合計 >= requested_qty なら充足可
+    combo_ok = (
+        options.filter(F.col("route_type") != "NEW_ORDER")  # 新規発注は最終手段なので組合せ判定からは除外
+        .groupBy("demand_id")
+        .agg(
+            F.sum("available_qty").alias("combo_total_avail"),
+            F.first("requested_qty").alias("req_qty_combo"),
+        )
+        .withColumn(
+            "combo_ok",
+            F.when(F.col("combo_total_avail") >= F.col("req_qty_combo"), F.lit(1)).otherwise(F.lit(0))
+        )
+        .select("demand_id", "combo_ok", "combo_total_avail")
+    )
+
+    options = options.join(single_ok, "demand_id", "left").join(combo_ok, "demand_id", "left")
+
+    # needs_action: 真の「要対応」フラグ
+    options = options.withColumn(
+        "action_level",
+        F.when(F.col("customer_stock_alone_ok") == 1, F.lit("不要"))
+        .when(F.col("any_single_route_ok") == 1, F.lit("軽"))
+        .when(F.col("combo_ok") == 1, F.lit("中"))
+        .otherwise(F.lit("重"))
+    ).withColumn(
+        "needs_action",
+        F.col("action_level") != F.lit("不要")
+    )
+
+    return options
+
+
+# ══════════════════════════════════════════════════════
+# 16. gold_bom_fulfillment_status ── 製品単位の充足状況
+# ══════════════════════════════════════════════════════
+# 業務上の重要性: 部材単独で充足してもBOM上の他部材が揃わないと製品は作れない。
+# 各製品×希望納期(月)について、「全部材揃うか？」を判定する。
+@dlt.table(
+    name="gold_bom_fulfillment_status",
+    comment=(
+        "製品×月単位のBOM充足状況。当該製品のFCST需要に対して、"
+        "BOM展開された全部材が4ルート組合せで充足可能か判定する。"
+        "is_all_fulfilled=False の場合、製品の生産が停止する可能性がある。"
+    ),
+)
+def gold_bom_fulfillment_status():
+    today = F.to_date(F.lit(TODAY))
+
+    # 製品×月の需要総数 (FCST_AUTOから集計)
+    demand = (
+        dlt.read("silver_demand_plan_components")
+        .filter(F.col("source_type") == F.lit("FCST_AUTO"))
+        .filter(F.col("product_id").isNotNull())
+        .filter(F.col("requested_date") >= today)
+    )
+
+    # 製品ごとのBOM (全部材リスト)
+    bom = dlt.read("silver_bom").select("product_id", "component_id", "quantity_per_unit")
+
+    # 各部材の組合せ充足可否 (gold_procurement_options から)
+    proc = dlt.read("gold_procurement_options").select(
+        "demand_id", "component_id", "requested_date", "needs_action", "action_level", "combo_ok"
+    )
+
+    # 製品×需要の各部材状態を集計
+    detail = (
+        demand.alias("d")
+        .join(proc.alias("p"), (F.col("d.demand_id") == F.col("p.demand_id")), "left")
+        .select(
+            F.col("d.product_id"),
+            F.col("d.requested_date").alias("requested_date"),
+            F.col("d.demand_id"),
+            F.col("d.component_id"),
+            F.col("p.action_level"),
+            F.col("p.combo_ok"),
+        )
+        .distinct()
+    )
+
+    # 製品×月の集計: 全部材が組合せ充足できるか
+    by_prod_month = (
+        detail
+        .withColumn("requested_month", F.date_format(F.col("requested_date"), "yyyy-MM"))
+        .groupBy("product_id", "requested_month")
+        .agg(
+            F.count("component_id").alias("total_components"),
+            F.sum(F.when(F.col("action_level") == F.lit("不要"), 1).otherwise(0)).alias("self_sufficient_components"),
+            F.sum(F.when(F.col("action_level") == F.lit("軽"), 1).otherwise(0)).alias("light_action_components"),
+            F.sum(F.when(F.col("action_level") == F.lit("中"), 1).otherwise(0)).alias("medium_action_components"),
+            F.sum(F.when(F.col("action_level") == F.lit("重"), 1).otherwise(0)).alias("heavy_action_components"),
+            F.sum(F.when(F.col("combo_ok") == 1, 1).otherwise(0)).alias("fulfillable_components"),
+            F.min(F.col("requested_date")).alias("earliest_requested_date"),
+        )
+        .withColumn(
+            "is_all_fulfilled",
+            F.col("fulfillable_components") == F.col("total_components"),
+        )
+        .withColumn(
+            "shortage_components",
+            F.col("total_components") - F.col("fulfillable_components"),
+        )
+        .withColumn(
+            "fulfillment_rate",
+            F.round(F.col("fulfillable_components") / F.col("total_components"), 3),
+        )
+        .withColumn(
+            "production_status",
+            F.when(F.col("is_all_fulfilled"), F.lit("🟢 生産可能"))
+            .when(F.col("fulfillment_rate") >= 0.8, F.lit("🟡 一部部材不足"))
+            .otherwise(F.lit("🔴 生産困難"))
+        )
+    )
+
+    # 製品名を結合
+    products = dlt.read("silver_products").select("product_id", "product_name", "product_category")
+    return by_prod_month.join(products, "product_id", "left")

@@ -19,7 +19,7 @@ import streamlit as st
 from styles import inject_css
 from components.sidebar import render_sidebar
 from components.today_banner import render_today_banner
-from components.route_comparison import render_route_comparison
+from components.route_comparison import render_route_comparison, render_route_legend
 from components.inventory_badge import render_inventory_legend
 from services.config import get_as_of_date
 from services.database import (
@@ -48,6 +48,7 @@ today = get_as_of_date()
 # ────────────────────────────────────────────────────────
 st.markdown("## 🎯 調達アクションセンター")
 st.caption("全需要×全部材の充足状況を一覧。行を選択すると4ルート比較を表示します。")
+render_route_legend()
 render_inventory_legend()
 st.markdown("")
 
@@ -196,6 +197,44 @@ else:
             requested_qty=int(sel_demand["requested_qty"]),
             requested_date=sel_demand["requested_date"],
         )
+
+        # 推奨組合せセクション
+        st.markdown("---")
+        st.markdown("### 💡 推奨組合せ（充足プラン）")
+        req_qty = int(sel_demand["requested_qty"])
+        # 4ルートを「即時性 + 確実度」順で並べてgreedyに充当
+        priority_order = ["CUSTOMER_STOCK", "MACNICA_FREE", "EXISTING_PO", "NEW_ORDER"]
+        sel_opt_sorted = sel_options.copy()
+        sel_opt_sorted["_p"] = sel_opt_sorted["route_type"].map({k: i for i, k in enumerate(priority_order)})
+        sel_opt_sorted = sel_opt_sorted.sort_values("_p")
+
+        remaining = req_qty
+        plan_rows = []
+        from components.route_comparison import ROUTE_META
+        for _, row in sel_opt_sorted.iterrows():
+            if remaining <= 0:
+                break
+            avail = int(row.get("available_qty", 0) or 0)
+            if avail <= 0:
+                continue
+            take = min(avail, remaining)
+            meta = ROUTE_META.get(row["route_type"], {})
+            plan_rows.append({
+                "ルート": meta.get("label_jp", row["route_type"]),
+                "充当数": take,
+                "ETA": row.get("eta_date"),
+                "確実度": row.get("confidence", "—"),
+            })
+            remaining -= take
+
+        if remaining > 0:
+            plan_rows.append({"ルート": "❌ 不足", "充当数": remaining, "ETA": "—", "確実度": "—"})
+            st.warning(f"⚠️ 4ルート総当たりでも {remaining:,} 個不足します")
+        else:
+            st.success("✅ 上記組合せで必要数を充足できます")
+
+        if plan_rows:
+            st.dataframe(pd.DataFrame(plan_rows), hide_index=True, use_container_width=True)
 
         # 補助情報
         st.markdown("")
