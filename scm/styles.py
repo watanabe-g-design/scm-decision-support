@@ -3,6 +3,10 @@ SCMデモアプリ用 テーマCSS（ダーク / ライト切替対応）
 =========================================================
 GitHub-style ダーク + 業務向けライトテーマの2系統を提供。
 セッションステート ``theme_mode`` で切替可能。
+
+Phase 6 修正: ライトテーマ時に文字色が変わらず白字のまま読めない問題に対応。
+  - CSS変数を全文字要素 (h1〜h6/p/span/div/li/strong/em/code) に強制適用
+  - Plotly キャンバスも背景色を切替対象に
 """
 
 # ════════════════════════════════════════════════════════
@@ -17,12 +21,14 @@ DARK_THEME_CSS = """
     --border: #30363d;
     --text-primary: #e6edf3;
     --text-secondary: #8b949e;
+    --text-strong: #ffffff;
     --accent-blue: #58a6ff;
     --accent-green: #2ea043;
     --accent-orange: #ffa000;
     --accent-red: #ff4646;
     --accent-purple: #bc8cff;
     --plot-bg: #0d1117;
+    --code-bg: #161b22;
 }
 </style>
 """
@@ -39,12 +45,14 @@ LIGHT_THEME_CSS = """
     --border: #d0d7de;
     --text-primary: #1f2328;
     --text-secondary: #656d76;
+    --text-strong: #000000;
     --accent-blue: #0969da;
     --accent-green: #1a7f37;
     --accent-orange: #bf8700;
     --accent-red: #cf222e;
     --accent-purple: #8250df;
     --plot-bg: #ffffff;
+    --code-bg: #f6f8fa;
 }
 </style>
 """
@@ -62,6 +70,25 @@ section[data-testid="stSidebar"] {
     color: var(--text-primary) !important;
 }
 
+/* ── 強制的に文字色をテーマ変数化（Phase 6 ライトモード対応） ── */
+.stApp, .stApp p, .stApp span, .stApp div, .stApp li, .stApp label,
+.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+.stApp strong, .stApp em, .stApp small {
+    color: var(--text-primary);
+}
+.stMarkdown, .stMarkdown p, .stMarkdown span, .stMarkdown li,
+.stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
+    color: var(--text-primary) !important;
+}
+.stCaption, [data-testid="stCaptionContainer"], small {
+    color: var(--text-secondary) !important;
+}
+.stApp code, .stApp pre {
+    background: var(--code-bg) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border) !important;
+}
+
 header[data-testid="stHeader"] {
     background: var(--bg-primary) !important;
     border-bottom: 1px solid var(--border) !important;
@@ -74,9 +101,12 @@ section[data-testid="stSidebar"] {
     background-color: var(--bg-secondary) !important;
     border-right: 1px solid var(--border) !important;
 }
+section[data-testid="stSidebar"] *,
 section[data-testid="stSidebar"] .stMarkdown,
 section[data-testid="stSidebar"] label,
-section[data-testid="stSidebar"] span {
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] div {
     color: var(--text-primary) !important;
 }
 
@@ -161,6 +191,9 @@ section[data-testid="stSidebar"] span {
     background: var(--bg-tertiary) !important;
     border-color: var(--accent-blue) !important;
 }
+.stButton > button p {
+    color: var(--text-primary) !important;
+}
 
 /* ── タブ ─────────────────────────────────── */
 .stTabs [data-baseweb="tab-list"] {
@@ -189,6 +222,16 @@ section[data-testid="stSidebar"] span {
     color: var(--text-primary) !important;
     border-color: var(--border) !important;
 }
+.stSelectbox label, .stMultiSelect label, .stRadio label, .stCheckbox label,
+.stDateInput label, .stNumberInput label, .stTextInput label, .stTextArea label,
+.stSlider label {
+    color: var(--text-primary) !important;
+}
+input[type="text"], input[type="number"], textarea {
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border) !important;
+}
 
 /* ── データフレーム ───────────────────────── */
 [data-testid="stDataFrame"] {
@@ -204,7 +247,10 @@ section[data-testid="stSidebar"] span {
     border-radius: 8px !important;
     margin-bottom: 4px !important;
 }
-[data-testid="stExpander"] summary {
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] p,
+[data-testid="stExpander"] span,
+[data-testid="stExpander"] div {
     color: var(--text-primary) !important;
     font-size: 13px !important;
 }
@@ -218,6 +264,14 @@ section[data-testid="stSidebar"] span {
 .stAlert {
     border-radius: 8px !important;
     border-width: 1px !important;
+}
+.stAlert p, .stAlert div, .stAlert span {
+    color: inherit !important;
+}
+
+/* ── ラジオボタン ─────────────────────────── */
+.stRadio [role="radiogroup"] label p {
+    color: var(--text-primary) !important;
 }
 
 /* ── スピナー ─────────────────────────────── */

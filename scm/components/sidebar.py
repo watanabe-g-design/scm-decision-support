@@ -1,13 +1,17 @@
 """
 共通サイドバー — 全ページで同一のナビゲーションを表示
 ========================================================
-新App構成（業務フロー順）:
-  Top    : 📊 総合ダッシュボード        (app.py)
-  Page 1 : 📅 製品FCST×部材必要量       (pages/1_demand_timeline.py)
-  Page 2 : 🎯 調達アクションセンター    (pages/2_action_center.py) ★コア
-  Page 3 : 🚨 緊急調達シミュレーター    (pages/3_emergency_simulator.py)
-  Page 4 : 📦 マクニカフリー在庫        (pages/4_macnica_free_inventory.py)
-  Page 5 : 🚚 物流トラッキング          (pages/5_logistics_geo.py)
+業務フロー順の構成:
+  Top    : 📊 総合ダッシュボード
+  Page 1 : 📅 製品FCST×部材必要量
+  Page 2 : 🎯 調達アクションセンター     ★コア
+  Page 3 : 🚨 緊急調達シミュレーター
+  Page 4 : 📦 マクニカフリー在庫
+  Page 5 : 🚚 物流トラッキング
+  Page 6 : 🧩 製品BOM充足ビュー
+  Page 7 : ⏳ リードタイム推移モニター
+  Page 8 : 🏭 顧客在庫×安全在庫モニター
+  Page 9 : 🔧 データパイプライン健全性
 """
 import streamlit as st
 
@@ -31,13 +35,26 @@ def render_sidebar():
 
         st.markdown("---")
 
+        st.caption("【意思決定フロー】")
         st.page_link("app.py",                                 label="📊 総合ダッシュボード")
         st.page_link("pages/1_demand_timeline.py",             label="📅 製品FCST × 部材必要量")
         st.page_link("pages/2_action_center.py",               label="🎯 調達アクションセンター")
         st.page_link("pages/3_emergency_simulator.py",         label="🚨 緊急調達シミュレーター")
+
+        st.markdown("")
+        st.caption("【在庫・物流】")
         st.page_link("pages/4_macnica_free_inventory.py",      label="📦 マクニカフリー在庫")
         st.page_link("pages/5_logistics_geo.py",               label="🚚 物流トラッキング")
+        st.page_link("pages/8_inventory_health.py",            label="🏭 顧客在庫×安全在庫")
+
+        st.markdown("")
+        st.caption("【供給能力モニター】")
         st.page_link("pages/6_bom_fulfillment.py",             label="🧩 製品BOM充足ビュー")
+        st.page_link("pages/7_lead_time_trend.py",             label="⏳ リードタイム推移")
+
+        st.markdown("")
+        st.caption("【運用・保守】")
+        st.page_link("pages/9_pipeline_health.py",             label="🔧 データパイプライン健全性")
 
         st.markdown("---")
         st.caption("🎨 表示モード")

@@ -25,36 +25,32 @@ from services.config import get_as_of_date
 def add_today_vline(
     fig: go.Figure,
     *,
-    line_color: str = "#ff4646",
+    line_color: str | None = None,
     annotation_text: str = "本日",
 ) -> go.Figure:
     """
     plotly Figure に「今日」を示す縦線とアノテーションを追加。
-
-    Parameters
-    ----------
-    fig : plotly.graph_objects.Figure
-    line_color : str
-        縦線の色 (デフォルト: 赤系)
-    annotation_text : str
-        縦線上部に表示するラベル
+    テーマ(ダーク/ライト)に応じた背景色で描画。
     """
+    from styles import plot_colors
+    colors = plot_colors()
+    line = line_color or colors["red"]
     today = get_as_of_date()
     fig.add_vline(
         x=today,
         line_width=1.5,
         line_dash="dash",
-        line_color=line_color,
+        line_color=line,
     )
     fig.add_annotation(
         x=today,
         y=1.02,
         yref="paper",
-        text=f"📅 {annotation_text}",
+        text=f"📅 {annotation_text} ({today.isoformat()})",
         showarrow=False,
-        font=dict(size=11, color=line_color),
-        bgcolor="#0d1117",
-        bordercolor=line_color,
+        font=dict(size=11, color=line),
+        bgcolor=colors["paper"],
+        bordercolor=line,
         borderwidth=1,
         borderpad=3,
     )

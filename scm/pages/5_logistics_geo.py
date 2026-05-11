@@ -4,9 +4,10 @@
 業務フロー: 納期回答 → 出荷 → 顧客倉庫到着
 
 このページの役割:
-  - サプライチェーンの物流フロー（メーカー→マクニカ倉庫→顧客）を地図で可視化
-  - 倉庫の在庫健全性を地図上で一覧把握
-  - GeoGenie（自然言語クエリ）で「○○県の倉庫の在庫状況は？」等を即答
+  - サプライチェーンの物流フロー（メーカー→マクニカ新子安→顧客倉庫）を地図で可視化
+  - 「倉庫」は基本的に**顧客倉庫**（顧客自社拠点）を指す
+  - マクニカ拠点は新子安ロジスティクスセンター1箇所のみ
+  - 顧客倉庫の在庫健全性と入荷遅延を地図で一覧把握
 """
 import sys
 from pathlib import Path
@@ -28,17 +29,19 @@ from services.database import (
     get_silver_warehouses,
 )
 
-# Genie クライアントは任意 (失敗してもページが動くように try-import)
 try:
     from services.genie_client import get_genie_client
     GENIE_AVAILABLE = True
 except Exception:
     GENIE_AVAILABLE = False
 
+# マクニカ新子安拠点ID
+MACNICA_WAREHOUSE_ID = "WH_MAC_SHINKOYASU"
+
 st.set_page_config(page_title="物流トラッキング | SCM調達支援", layout="wide")
 inject_css()
 render_sidebar()
-render_today_banner(extra_note="物流フロー可視化と自然言語クエリ")
+render_today_banner(extra_note="メーカー→マクニカ新子安→顧客倉庫の物流フロー")
 
 # ────────────────────────────────────────────────────────
 # データロード
@@ -56,21 +59,35 @@ today = get_as_of_date()
 # ────────────────────────────────────────────────────────
 st.markdown("## 🚚 物流トラッキング（GeoGenie活用）")
 st.caption(
-    "メーカー → マクニカ倉庫 → 顧客 の物流フローを地図で可視化。"
-    "倉庫健全性とルート別出荷数を一目で把握できます。"
+    "メーカー → マクニカ新子安ロジスティクスセンター → **顧客倉庫** の物流フローを地図で可視化。"
+    "顧客倉庫の在庫健全性とルート別出荷数を一目で把握できます。"
 )
 
+# 用語の説明
+with st.expander("📖 倉庫の種類について（用語の混同防止）", expanded=False):
+    st.markdown(
+        """
+- **顧客倉庫**（このページの『倉庫』）: 顧客自社が保有する倉庫。地図プロットされる10拠点はすべて**顧客倉庫**。
+- **マクニカ拠点**: 新子安ロジスティクスセンター（神奈川県）1箇所のみ。マクニカが保有する全部材は新子安を経由します。
+- **マクニカフリー在庫**: マクニカ新子安に保管された顧客向け引当済在庫。詳細は『📦 マクニカフリー在庫モニター』へ。
+"""
+    )
+
 # ────────────────────────────────────────────────────────
-# KPI
+# KPI (顧客倉庫向けの入荷/遅延)
 # ────────────────────────────────────────────────────────
 if not logistics.empty:
     log = logistics.copy()
     log["actual_arrival_date"] = pd.to_datetime(log["actual_arrival_date"], errors="coerce").dt.date
     log["delay_days"] = pd.to_numeric(log["delay_days"], errors="coerce").fillna(0).astype(int)
 
-    # 直近30日の出荷
     recent_cutoff = today - pd.Timedelta(days=30).to_pytimedelta()
     recent_log = log[log["actual_arrival_date"] >= recent_cutoff]
+
+    # 顧客倉庫件数 (マクニカ新子安を除く)
+    customer_wh_count = 0
+    if not geo_wh.empty:
+        customer_wh_count = int((geo_wh["warehouse_id"] != MACNICA_WAREHOUSE_ID).sum())
 
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("📦 直近30日 出荷件数", f"{len(recent_log):,} 件")
@@ -78,15 +95,15 @@ if not logistics.empty:
     k2.metric("⏰ 直近30日 遅延件数", f"{delayed_n:,} 件")
     avg_delay = float(recent_log[recent_log["delay_days"] > 0]["delay_days"].mean() or 0)
     k3.metric("📊 平均遅延日数", f"{avg_delay:.1f} 日")
-    k4.metric("🏭 稼働倉庫数", f"{int(geo_wh['warehouse_id'].nunique()) if not geo_wh.empty else 0} 拠点")
+    k4.metric("🏭 顧客倉庫数", f"{customer_wh_count} 拠点")
 
 st.markdown("---")
 
 # ────────────────────────────────────────────────────────
-# 日本地図 (GeoGenie風: 倉庫プロット + ルート線)
+# 日本地図
 # ────────────────────────────────────────────────────────
-st.markdown("### 🗾 サプライチェーン物流マップ")
-st.caption("各倉庫の健全性を色で表示。ルート線をクリックすると月間出荷数を確認できます。")
+st.markdown("### 🗾 サプライチェーン物流マップ（顧客倉庫の健全性）")
+st.caption("地図にプロットされる倉庫は**顧客倉庫**です。健全性スコアで色分け表示。")
 
 col_chk1, col_chk2, _ = st.columns([1, 1, 4])
 with col_chk1:
@@ -94,17 +111,16 @@ with col_chk1:
 with col_chk2:
     route_filter = st.selectbox(
         "ルート種別",
-        ["全て", "メーカー→倉庫 (inbound)", "倉庫→顧客 (outbound)"],
+        ["全て", "メーカー→新子安 (inbound)", "新子安→顧客倉庫 (outbound)"],
         label_visibility="collapsed",
     )
 
-# 地図用データ整形: gold_geo_warehouse_status を使う (component_count, total_stock_qty などを保持)
 if not geo_wh.empty:
     routes_show = routes.copy() if not routes.empty else pd.DataFrame()
     if not routes_show.empty:
-        if route_filter == "メーカー→倉庫 (inbound)":
+        if route_filter == "メーカー→新子安 (inbound)":
             routes_show = routes_show[routes_show["route_type"] == "inbound"]
-        elif route_filter == "倉庫→顧客 (outbound)":
+        elif route_filter == "新子安→顧客倉庫 (outbound)":
             routes_show = routes_show[routes_show["route_type"] == "outbound"]
 
     render_japan_map(
@@ -119,25 +135,28 @@ else:
 st.markdown("---")
 
 # ────────────────────────────────────────────────────────
-# 倉庫別 健全性ランキング
+# 顧客倉庫別 健全性ランキング
 # ────────────────────────────────────────────────────────
-st.markdown("### 🏆 倉庫別 健全性ランキング")
+st.markdown("### 🏆 顧客倉庫別 健全性ランキング")
+st.caption("各顧客倉庫について、安全在庫レンジ内に納まっている部材数の割合で健全性を評価。")
+
 if not geo_wh.empty:
+    # マクニカ新子安を除外
+    customer_wh = geo_wh[geo_wh["warehouse_id"] != MACNICA_WAREHOUSE_ID].copy()
     wh_show_cols = [
         ("warehouse_id",         "倉庫ID"),
-        ("warehouse_name",       "倉庫名"),
+        ("warehouse_name",       "倉庫名(顧客倉庫)"),
         ("prefecture",           "都道府県"),
-        ("component_count",      "管理部材数"),
+        ("managed_count",        "管理部材数"),
         ("total_stock_qty",      "在庫数量"),
-        ("below_safety_count",   "安全在庫割れ"),
-        ("critical_items",       "🔴 Critical"),
-        ("high_items",           "🟠 High"),
+        ("zero_count",           "🔴 在庫切れ"),
+        ("under_count",          "🟠 安全在庫割れ"),
         ("incoming_shipments",   "入荷予定"),
         ("delayed_shipments",    "遅延中"),
         ("health_score",         "健全性スコア"),
     ]
-    cols_present = [(k, v) for k, v in wh_show_cols if k in geo_wh.columns]
-    df_show = geo_wh[[k for k, _ in cols_present]].rename(columns=dict(cols_present))
+    cols_present = [(k, v) for k, v in wh_show_cols if k in customer_wh.columns]
+    df_show = customer_wh[[k for k, _ in cols_present]].rename(columns=dict(cols_present))
     if "健全性スコア" in df_show.columns:
         df_show = df_show.sort_values("健全性スコア", ascending=False)
     st.dataframe(df_show, hide_index=True, use_container_width=True, height=320)
@@ -147,7 +166,7 @@ st.markdown("---")
 # ────────────────────────────────────────────────────────
 # 直近の出荷遅延明細
 # ────────────────────────────────────────────────────────
-st.markdown("### ⏰ 直近の出荷遅延")
+st.markdown("### ⏰ 直近の出荷遅延（メーカー→新子安 もしくは 新子安→顧客倉庫）")
 if not logistics.empty:
     log = logistics.copy()
     log["actual_arrival_date"] = pd.to_datetime(log["actual_arrival_date"], errors="coerce").dt.date
@@ -166,7 +185,7 @@ if not logistics.empty:
         ]].rename(columns={
             "shipment_id":              "出荷ID",
             "component_id":             "部材ID",
-            "destination_warehouse_id": "到着倉庫",
+            "destination_warehouse_id": "到着先倉庫",
             "expected_arrival_date":    "予定到着日",
             "actual_arrival_date":      "実到着日",
             "delay_days":               "遅延日数",
@@ -181,7 +200,7 @@ st.markdown("---")
 # Genie 自然言語クエリ
 # ────────────────────────────────────────────────────────
 st.markdown("### 💬 Genie で質問する（自然言語クエリ）")
-st.caption("例: 「埼玉県の倉庫の在庫状況は？」「直近30日の遅延が多い部材を教えて」")
+st.caption("例: 「埼玉県の顧客倉庫の在庫状況は？」「直近30日の遅延が多い部材を教えて」")
 
 if not GENIE_AVAILABLE:
     st.info("Genie クライアントが利用できません。Databricks Apps 環境で実行するとアクティブになります。")
