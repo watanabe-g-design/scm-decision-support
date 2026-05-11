@@ -77,21 +77,31 @@ if not warehouses.empty:
     )
 
 # ────────────────────────────────────────────────────────
-# フィルター
+# フィルター（タイトル明確化）
 # ────────────────────────────────────────────────────────
-st.markdown("### 🔍 フィルター")
+st.markdown("### 🔍 絞り込みフィルター（マクニカフリー在庫の表示範囲を絞る）")
 fc1, fc2, fc3 = st.columns(3)
 
 with fc1:
     cat_options = ["（すべて）"] + sorted([c for c in free["component_category"].dropna().unique()])
-    sel_cat = st.selectbox("部材カテゴリ", cat_options)
+    sel_cat = st.selectbox(
+        "🔍 部材カテゴリで絞り込み（例: MCU、SiC等）",
+        cat_options,
+    )
 
 with fc2:
     wh_options = ["（すべて）"] + sorted([w for w in free["warehouse_name"].dropna().unique()])
-    sel_wh = st.selectbox("保管倉庫", wh_options)
+    sel_wh = st.selectbox(
+        "🏭 マクニカ倉庫で絞り込み（引当の保管地）",
+        wh_options,
+    )
 
 with fc3:
-    qty_threshold = st.number_input("最低引当数量 (これ以上)", min_value=0, value=0, step=10)
+    qty_threshold = st.number_input(
+        "📦 最低引当数量フィルター（この値以上の引当のみ表示）",
+        min_value=0, value=0, step=10,
+        help="少量引当を除外して、ある程度まとまった引当のみを見たいときに使用",
+    )
 
 # 適用
 if sel_cat != "（すべて）":

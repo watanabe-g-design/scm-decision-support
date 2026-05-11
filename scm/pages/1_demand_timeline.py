@@ -69,28 +69,38 @@ if not components.empty:
     demand = demand.merge(comp_lite, on="component_id", how="left")
 
 # ────────────────────────────────────────────────────────
-# フィルター
+# フィルター（タイトル明確化）
 # ────────────────────────────────────────────────────────
-st.markdown("### 🔍 フィルター")
+st.markdown("### 🔍 絞り込みフィルター（タイムラインに集計する需要を絞る）")
 fc1, fc2, fc3 = st.columns([2, 2, 1])
 
 with fc1:
     cat_options = ["（すべて）"] + sorted([c for c in demand["component_category"].dropna().unique()])
-    sel_cat = st.selectbox("部材カテゴリ", cat_options, index=0)
+    sel_cat = st.selectbox(
+        "🔍 部材カテゴリで絞り込み（例: MCU、SiC、CAN等）",
+        cat_options, index=0,
+    )
 
 with fc2:
-    src_options = ["（すべて）", "FCST_AUTO", "EMERGENCY_MANUAL"]
-    sel_src = st.selectbox("需要発生源", src_options, index=0)
+    src_options = ["（すべて）", "営業FCSTから自動展開", "緊急手動入力"]
+    sel_src = st.selectbox(
+        "📋 需要発生源（FCST自動展開 or 緊急手動入力）",
+        src_options, index=0,
+    )
 
 with fc3:
-    months_ahead = st.slider("表示月数", 1, 12, 6, help="今日からの先読み月数")
+    months_ahead = st.slider(
+        "📅 表示月数（今日から何ヶ月先まで）",
+        1, 12, 6, help="今日からの先読み月数。グラフのX軸範囲に対応",
+    )
 
 # フィルター適用
 df = demand.copy()
 if sel_cat != "（すべて）":
     df = df[df["component_category"] == sel_cat]
 if sel_src != "（すべて）":
-    df = df[df["source_type"] == sel_src]
+    src_map = {"営業FCSTから自動展開": "FCST_AUTO", "緊急手動入力": "EMERGENCY_MANUAL"}
+    df = df[df["source_type"] == src_map[sel_src]]
 
 # 期間フィルター
 end_date = today + pd.Timedelta(days=months_ahead * 30).to_pytimedelta()

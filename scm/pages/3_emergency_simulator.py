@@ -24,7 +24,11 @@ from components.sidebar import render_sidebar
 from components.today_banner import render_today_banner
 from components.route_comparison import ROUTE_META, render_route_comparison, render_route_legend
 from components.inventory_badge import render_inventory_legend
+from components.drill_down import pop_drill_filter
 from services.config import get_as_of_date
+from services.recommendation import (
+    generate_action_options, estimate_pull_in_qty_from_next_month,
+)
 from services.database import (
     get_silver_components,
     get_silver_inventory_current,
@@ -80,7 +84,10 @@ with st.form("emergency_form"):
     # 1段階目: カテゴリ
     with fc1:
         cat_options = ["（すべて）"] + sorted([c for c in components["component_category"].dropna().unique()])
-        sel_cat = st.selectbox("① 部材カテゴリで絞り込み", cat_options)
+        sel_cat = st.selectbox(
+            "① 🔍 部材カテゴリで絞り込み（候補数を減らすため）",
+            cat_options,
+        )
 
     # 1段階目フィルター結果
     if sel_cat != "（すべて）":
@@ -97,22 +104,25 @@ with st.form("emergency_form"):
             + "  ｜  " + comp_filtered_show["component_name"].astype(str)
         )
         sel_comp = st.selectbox(
-            f"② 部材を選択（候補 {len(comp_filtered_show)} 件）",
+            f"② 🔧 部材を選択（候補 {len(comp_filtered_show)} 件、品番・名称で検索可能）",
             comp_filtered_show["_label"].tolist(),
         )
 
     fc3, fc4 = st.columns(2)
     with fc3:
-        req_qty = st.number_input("必要数量", min_value=1, max_value=100000, value=150, step=10)
+        req_qty = st.number_input(
+            "📦 必要数量（突発的に必要となった部材数）",
+            min_value=1, max_value=100000, value=150, step=10,
+        )
     with fc4:
         req_date = st.date_input(
-            "希望納期",
+            "⏰ 希望納期（この日までに入手したい）",
             value=today + timedelta(days=14),
             min_value=today,
             max_value=today + timedelta(days=365),
         )
 
-    submit = st.form_submit_button("🔬 4ルート評価を実行", use_container_width=True)
+    submit = st.form_submit_button("🔬 4ルート評価＋具体アクション案を生成", use_container_width=True)
 
 # ────────────────────────────────────────────────────────
 # シミュレーション実行
@@ -192,6 +202,38 @@ if submit:
     st.markdown("---")
     st.markdown("### 🔬 4ルート評価結果")
     render_route_comparison(sim_df, requested_qty=int(req_qty), requested_date=req_date)
+
+    # ────────────────────────────────────────────
+    # 💡 具体アクション案（複数選択肢併記）
+    # ────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 💡 具体アクション案（複数の実行可能な選択肢）")
+    st.caption("各案には具体的な手順・数量・完了日が明記されています。比較して判断してください。")
+
+    pull_in = estimate_pull_in_qty_from_next_month(
+        component_id=sel_comp_id,
+        requested_date=req_date,
+        demand_df=demand_all,
+        today=today,
+    )
+    action_opts = generate_action_options(
+        routes_df=sim_df,
+        requested_qty=int(req_qty),
+        requested_date=req_date,
+        today=today,
+        other_month_pull_in_qty=pull_in,
+        component_lt_weeks=base_lt_weeks,
+    )
+
+    for i, opt_a in enumerate(action_opts[:6], start=1):
+        st.markdown(
+            f"**{opt_a.title}** ｜ 確実度: `{opt_a.feasibility}` ｜ 充足: {opt_a.coverage_qty:,}個"
+            + (f" / 未充足: {opt_a.gap_qty:,}個" if opt_a.gap_qty else "")
+            + f" ｜ 完了日: **{opt_a.eta_date.isoformat()}**"
+        )
+        for step in opt_a.steps:
+            st.markdown(f"&emsp;• {step}", unsafe_allow_html=True)
+        st.markdown("")
 
     # 影響製品 (BOMから)
     st.markdown("---")

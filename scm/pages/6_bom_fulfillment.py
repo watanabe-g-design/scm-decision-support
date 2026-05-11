@@ -89,23 +89,32 @@ k4.metric("🔴 生産困難", f"{n_critical} 件")
 st.markdown("---")
 
 # ────────────────────────────────────────────────────────
-# フィルター
+# フィルター（タイトル明確化）
 # ────────────────────────────────────────────────────────
-st.markdown("### 🔍 フィルター")
+st.markdown("### 🔍 絞り込みフィルター（製品BOM充足状況の表示範囲を絞る）")
 fc1, fc2, fc3 = st.columns(3)
 
 with fc1:
     status_options = ["（すべて）", "🔴 生産困難", "🟡 一部部材不足", "🟢 生産可能"]
-    sel_status = st.selectbox("生産ステータス", status_options)
+    sel_status = st.selectbox(
+        "🏭 生産可否ステータス（BOM部材の充足度合いで分類）",
+        status_options,
+    )
 
 with fc2:
     cat_options = ["（すべて）"] + sorted([c for c in df.get("product_category", pd.Series(dtype=str)).dropna().unique()])
-    sel_cat = st.selectbox("製品カテゴリ", cat_options)
+    sel_cat = st.selectbox(
+        "📦 製品カテゴリで絞り込み",
+        cat_options,
+    )
 
 with fc3:
     months = sorted(df["requested_month"].dropna().unique().tolist())
     month_options = ["（すべて）"] + months
-    sel_month = st.selectbox("対象月", month_options)
+    sel_month = st.selectbox(
+        "📅 生産対象月で絞り込み（FCSTの納期月）",
+        month_options,
+    )
 
 df_show = df.copy()
 if sel_status != "（すべて）":
