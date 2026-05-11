@@ -19,7 +19,11 @@ import streamlit as st
 from styles import inject_css, plot_colors
 from components.sidebar import render_sidebar
 from components.today_banner import render_today_banner
-from components.search_bar import render_search_bar, apply_component_search
+from components.search_bar import (
+    render_search_bar, render_component_selector,
+    apply_component_search, apply_component_id_filter,
+)
+from services.plot_theme import base_layout, get_theme_tokens, palette as theme_palette
 from services.config import get_as_of_date
 from services.database import (
     get_lt_snapshot,
@@ -91,24 +95,26 @@ snap_for_search["component_id"] = snap_for_search["item_id"]
 snap_for_search["part_number"] = snap_for_search["item_code"]
 snap_for_search["component_name"] = snap_for_search["item_name"]
 
-search_query = render_search_bar(comps if not comps.empty else snap_for_search, key="lt_search")
+# Phase 7: 部材カテゴリは廃止、検索 + セレクタ + LT傾向で絞り込み
+sb1, sb2 = st.columns(2)
+with sb1:
+    search_query = render_search_bar(comps if not comps.empty else snap_for_search, key="lt_search")
+with sb2:
+    sel_comp_ids = render_component_selector(comps if not comps.empty else snap_for_search, key="lt_comp_sel")
 
-fc1, fc2, fc3 = st.columns(3)
+fc1, fc2 = st.columns(2)
 with fc1:
-    cat_options = ["（すべて）"] + sorted([c for c in snap_for_search.get("component_category", pd.Series(dtype=str)).dropna().unique()])
-    sel_cat = st.selectbox("📂 部材カテゴリで絞り込み", cat_options)
-with fc2:
     band_options = ["（すべて）"] + sorted([b for b in snap_for_search.get("lt_band", pd.Series(dtype=str)).dropna().unique()])
     sel_band = st.selectbox("📏 LTバンドで絞り込み", band_options)
-with fc3:
+with fc2:
     trend_options = ["（すべて）", "🚨 LT延長中（N-3↑ or N-6↑）", "📈 LT短縮中（↓）", "→ 横ばい"]
     sel_trend = st.selectbox("📊 LT推移傾向で絞り込み", trend_options)
 
 filtered = snap_for_search.copy()
 if search_query:
     filtered = apply_component_search(filtered, search_query)
-if sel_cat != "（すべて）":
-    filtered = filtered[filtered["component_category"] == sel_cat]
+if sel_comp_ids:
+    filtered = apply_component_id_filter(filtered, sel_comp_ids)
 if sel_band != "（すべて）":
     filtered = filtered[filtered["lt_band"] == sel_band]
 if sel_trend == "🚨 LT延長中（N-3↑ or N-6↑）":
@@ -186,13 +192,12 @@ else:
     trend["lead_time_weeks"] = pd.to_numeric(trend["lead_time_weeks"], errors="coerce")
 
     # ピッカー用ラベル
-    pick_df = trend[["component_id", "part_number", "component_name", "component_category"]].drop_duplicates()
+    pick_df = trend[["component_id", "part_number", "component_name"]].drop_duplicates()
     pick_df["_label"] = (
         pick_df["component_id"].astype(str)
         + "  ｜  " + pick_df["part_number"].fillna("").astype(str)
         + "  ｜  " + pick_df["component_name"].fillna("").astype(str)
     )
-    # デフォルト: 現在LTが長い上位3部材
     top3 = filtered.nlargest(3, "latest_lt_weeks")["item_id"].tolist() if not filtered.empty else []
     default_labels = pick_df[pick_df["component_id"].isin(top3)]["_label"].tolist()
 
@@ -207,11 +212,7 @@ else:
         if not sub.empty:
             sub["month_dt"] = pd.to_datetime(sub["month"] + "-01", errors="coerce")
             sub = sub.sort_values(["component_id", "month_dt"])
-
-            color_palette = [
-                colors["blue"], colors["orange"], colors["green"], colors["red"], colors["purple"],
-                "#ff8000", "#00bfa5", "#e91e63", "#3f51b5", "#795548",
-            ]
+            color_pal = theme_palette()
 
             fig = go.Figure()
             for i, cid in enumerate(sel_ids):
@@ -223,20 +224,12 @@ else:
                     x=s["month_dt"], y=s["lead_time_weeks"],
                     mode="lines+markers",
                     name=label,
-                    line=dict(color=color_palette[i % len(color_palette)], width=2),
-                    marker=dict(size=6),
+                    line=dict(color=color_pal[i % len(color_pal)], width=2.5),
+                    marker=dict(size=7),
                 ))
 
-            fig.update_layout(
-                height=420,
-                plot_bgcolor=colors["bg"],
-                paper_bgcolor=colors["paper"],
-                font=dict(color=colors["text"], size=12),
-                xaxis=dict(title="年月", gridcolor=colors["grid"]),
-                yaxis=dict(title="リードタイム（週）", gridcolor=colors["grid"]),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02),
-                margin=dict(l=40, r=20, t=40, b=40),
-            )
+            fig.update_layout(**base_layout(height=420, x_title="年月", y_title="リードタイム（週）"))
+            fig.update_xaxes(tickformat="%Y-%m")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("選択部材の推移データが見つかりません。")

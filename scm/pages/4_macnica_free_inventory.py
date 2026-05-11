@@ -2,15 +2,13 @@
 📦 マクニカフリー在庫モニター
 ==============================
 業務上の役割:
-  - マクニカが顧客向けに引当済みの在庫を「部材別」に可視化
+  - マクニカが顧客向けに引当済の在庫を「部材別」に可視化
   - マクニカのフリー在庫は新子安ロジスティクスセンター1拠点に集約
-    (顧客倉庫マスタとは別物。顧客倉庫=顧客自社倉庫)
   - 引当済みなので、マクニカ営業に相談すれば即時(今日+輸送日数)で受け取れる
 
-Phase 6 改修:
-  ✅ 倉庫別の棒グラフを撤廃、部材別 表示中心へ
-  ✅ 「フリー在庫」の保管拠点=新子安1拠点 を明示
-  ✅ 「顧客在庫 vs マクニカフリー」の対比ビューを残す
+Phase 7 改修:
+  ✅ 部材カテゴリフィルター撤廃 → 検索 + 部材セレクタへ
+  ✅ 「部材別 引当残量」表に「いつのスナップショットか・何に使うか」キャプションを追加
 """
 import sys
 from pathlib import Path
@@ -21,12 +19,16 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from styles import inject_css, plot_colors
+from styles import inject_css
 from components.sidebar import render_sidebar
 from components.today_banner import render_today_banner
 from components.inventory_badge import render_inventory_legend
-from components.search_bar import render_search_bar, apply_component_search
+from components.search_bar import (
+    render_search_bar, render_component_selector,
+    apply_component_search, apply_component_id_filter,
+)
 from services.config import get_as_of_date
+from services.plot_theme import base_layout, get_theme_tokens
 from services.database import (
     get_silver_macnica_free_inventory,
     get_silver_inventory_current,
@@ -38,7 +40,7 @@ inject_css()
 render_sidebar()
 render_today_banner(extra_note="マクニカが顧客向けに引当済の在庫を部材別に可視化")
 
-colors = plot_colors()
+t = get_theme_tokens()
 
 # ────────────────────────────────────────────────────────
 # データロード
@@ -50,9 +52,6 @@ with st.spinner("データを読み込んでいます..."):
 
 today = get_as_of_date()
 
-# ────────────────────────────────────────────────────────
-# タイトル
-# ────────────────────────────────────────────────────────
 st.markdown("## 📦 マクニカフリー在庫モニター")
 st.caption(
     "マクニカが貴社向けに引当済の在庫一覧。"
@@ -73,34 +72,30 @@ free["qty_available"] = pd.to_numeric(free["qty_available"], errors="coerce").fi
 
 if not components.empty:
     free = free.merge(
-        components[["component_id", "part_number", "component_name", "component_category", "unit_price_usd", "base_lead_time_weeks"]],
+        components[["component_id", "part_number", "component_name", "unit_price_usd", "base_lead_time_weeks"]],
         on="component_id", how="left",
     )
 
 # ────────────────────────────────────────────────────────
-# 検索 + フィルター
+# 検索 + 部材セレクタ (Phase 7: カテゴリは廃止)
 # ────────────────────────────────────────────────────────
-st.markdown("### 🔍 絞り込みフィルター（マクニカフリー在庫の表示範囲を絞る）")
-search_query = render_search_bar(components, key="free_search")
-
+st.markdown("### 🔍 絞り込みフィルター")
 fc1, fc2 = st.columns(2)
 with fc1:
-    cat_options = ["（すべて）"] + sorted([c for c in free["component_category"].dropna().unique()])
-    sel_cat = st.selectbox(
-        "🔍 部材カテゴリで絞り込み（例: MCU、SiC等）",
-        cat_options,
-    )
+    search_query = render_search_bar(components, key="free_search")
 with fc2:
-    qty_threshold = st.number_input(
-        "📦 最低引当数量フィルター（この値以上の引当のみ表示）",
-        min_value=0, value=0, step=10,
-        help="少量引当を除外して、ある程度まとまった引当のみを見たいときに使用",
-    )
+    selected_ids = render_component_selector(components, key="free_comp_sel")
+
+qty_threshold = st.number_input(
+    "📦 最低引当数量フィルター（この値以上の引当のみ表示）",
+    min_value=0, value=0, step=10,
+    help="少量引当を除外して、ある程度まとまった引当のみを見たいときに使用",
+)
 
 if search_query:
     free = apply_component_search(free, search_query)
-if sel_cat != "（すべて）":
-    free = free[free["component_category"] == sel_cat]
+if selected_ids:
+    free = apply_component_id_filter(free, selected_ids)
 if qty_threshold > 0:
     free = free[free["qty_available"] >= qty_threshold]
 
@@ -127,39 +122,40 @@ k4.metric("🏷️ 高額引当（>$5000）", f"{high_value_items} 品目")
 st.markdown("---")
 
 # ────────────────────────────────────────────────────────
-# 部材別 引当数量（メインビュー: バーチャート + テーブル）
+# 部材別 引当数量
 # ────────────────────────────────────────────────────────
 st.markdown("### 📊 部材別 引当数量（マクニカ→貴社 即時出荷可能）")
-st.caption("引当数量が大きい部材ほど、突発需要への即応性が高い候補です。")
+st.caption(
+    f"📅 **基準日**: {today.isoformat()} 時点の引当残量。"
+    "引当数量が大きい部材ほど、突発需要への即応性が高い候補です。"
+    "上位の部材は『緊急調達シミュレーター』のシミュレーション対象として優先的に検討してください。"
+)
 
 by_comp = (
-    free.groupby(["component_id", "part_number", "component_name", "component_category"], dropna=False, as_index=False)
+    free.groupby(["component_id", "part_number", "component_name"], dropna=False, as_index=False)
     .agg(引当数量=("qty_available", "sum"))
     .sort_values("引当数量", ascending=False)
 )
 
-# Top20をバーチャート
 top_n = min(20, len(by_comp))
-fig = go.Figure()
 top = by_comp.head(top_n).sort_values("引当数量", ascending=True)
+fig = go.Figure()
 fig.add_trace(go.Bar(
     x=top["引当数量"], y=top["part_number"].fillna("") + " / " + top["component_name"].fillna(""),
     orientation="h",
-    marker_color=colors["green"],
+    marker=dict(color=t["green"], line=dict(width=0)),
     text=top["引当数量"].apply(lambda v: f"{v:,}"),
     textposition="outside",
+    textfont=dict(color=t["text"], size=11),
     hovertemplate="%{y}<br>引当数量: %{x:,}<extra></extra>",
 ))
 fig.update_layout(
-    height=560,
-    plot_bgcolor=colors["bg"],
-    paper_bgcolor=colors["paper"],
-    font=dict(color=colors["text"], size=11),
-    xaxis=dict(title="引当数量（個）", gridcolor=colors["grid"]),
-    yaxis=dict(title="", gridcolor=colors["grid"]),
-    margin=dict(l=200, r=20, t=30, b=40),
-    title=dict(text=f"📦 引当数量 Top {top_n}", font=dict(size=14, color=colors["text"])),
+    **base_layout(
+        height=560, x_title="引当数量（個）", y_title="",
+        show_legend=False, title=f"📦 引当数量 Top {top_n} ({today.isoformat()} 時点)",
+    ),
 )
+fig.update_layout(margin=dict(l=240, r=20, t=46, b=44))
 st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("---")
@@ -167,8 +163,13 @@ st.markdown("---")
 # ────────────────────────────────────────────────────────
 # 部材別 引当残量と顧客在庫の比較
 # ────────────────────────────────────────────────────────
-st.markdown("### 🔍 部材別 引当残量（顧客在庫との比較）")
-st.caption("「顧客在庫が少ない × マクニカフリー在庫が多い」部材は、活用余地が大きい候補です。")
+st.markdown("### 🔍 部材別 引当残量 × 顧客在庫 対比表")
+st.caption(
+    f"📅 **基準日**: {today.isoformat()} 時点のスナップショット (今日時点の在庫数値)。"
+    "**用途**: 「顧客在庫が少ない × マクニカフリーが多い」部材を見つけ、"
+    "突発需要や緊急増産の際に即時供給可能な候補を抽出します。"
+    "活用余地スコアが高い部材は『緊急調達シミュレーター』で具体的なルート評価へ。"
+)
 
 free_by_comp = free.groupby("component_id", as_index=False)["qty_available"].sum()
 free_by_comp.columns = ["component_id", "macnica_free_qty"]
@@ -186,7 +187,7 @@ cmp = free_by_comp.merge(cust_by_comp, on="component_id", how="left")
 cmp["customer_qty"] = pd.to_numeric(cmp["customer_qty"], errors="coerce").fillna(0).astype(int)
 if not components.empty:
     cmp = cmp.merge(
-        components[["component_id", "part_number", "component_name", "component_category", "base_lead_time_weeks"]],
+        components[["component_id", "part_number", "component_name", "base_lead_time_weeks"]],
         on="component_id", how="left",
     )
 cmp["合計"] = cmp["macnica_free_qty"] + cmp["customer_qty"]
@@ -197,15 +198,14 @@ cmp["活用余地スコア"] = cmp.apply(
 cmp = cmp.sort_values("活用余地スコア", ascending=False)
 
 show_cols_map = [
-    ("component_id",      "部材ID"),
-    ("part_number",       "品番"),
-    ("component_name",    "部材名"),
-    ("component_category","カテゴリ"),
+    ("component_id",         "部材ID"),
+    ("part_number",          "品番"),
+    ("component_name",       "部材名"),
     ("base_lead_time_weeks", "通常LT(週)"),
-    ("macnica_free_qty",  "📦 マクニカフリー在庫"),
-    ("customer_qty",      "🏭 顧客在庫"),
-    ("合計",               "合計"),
-    ("活用余地スコア",       "活用余地(F/C比)"),
+    ("macnica_free_qty",     "📦 マクニカフリー在庫"),
+    ("customer_qty",         "🏭 顧客在庫"),
+    ("合計",                  "合計"),
+    ("活用余地スコア",          "活用余地(F/C比)"),
 ]
 cols_present = [(k, v) for k, v in show_cols_map if k in cmp.columns]
 st.dataframe(
@@ -215,6 +215,7 @@ st.dataframe(
 st.caption(
     "💡 **活用余地スコア**: マクニカフリー数量 ÷ 顧客在庫数量。値が大きいほど"
     "「顧客在庫が薄く、マクニカフリーで補填する価値が高い」部材です。"
+    "（スコア=0 はマクニカフリー在庫なし）"
 )
 
 # ────────────────────────────────────────────────────────

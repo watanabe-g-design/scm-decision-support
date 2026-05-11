@@ -34,9 +34,9 @@ TODAY = date(2026, 3, 28)
 # 対象顧客 (今回のデモは1社固定)
 TARGET_CUSTOMER_ID = "CUS001"
 
-# 期間
-PAST_WINDOW_DAYS   = 30
-FUTURE_WINDOW_DAYS = 180
+# 期間 (Phase 7: 9ヶ月先まで需要を生成)
+PAST_WINDOW_DAYS   = 0     # 過去日の需要は排除
+FUTURE_WINDOW_DAYS = 270   # 9ヶ月先まで
 
 # 数量上限 (現実的なスケール)
 MAX_DEMAND_QTY = 6000           # 単一需要の上限
@@ -396,6 +396,55 @@ def adjust_inventory_for_scenarios(
     return df
 
 
+def extend_forecasts_to_2026_12(fc_df: pd.DataFrame) -> pd.DataFrame:
+    """forecasts.csv を 2026-12 まで延長 (デモを 9ヶ月先まで網羅するため)。"""
+    df = fc_df.copy()
+    df["forecast_month"] = pd.to_datetime(df["forecast_month"], format="mixed", errors="coerce")
+
+    target_end = pd.Timestamp("2026-12-01")
+    current_end = df["forecast_month"].max()
+
+    if current_end >= target_end:
+        df["forecast_month"] = df["forecast_month"].dt.strftime("%Y-%m-%d")
+        return df
+
+    # 不足月数を追加
+    new_rows = []
+    next_id = (
+        df["forecast_id"].str.extract(r"FC(\d+)")[0].astype(int).max() + 1
+        if "forecast_id" in df.columns
+        else 1
+    )
+    # 各 (product_id, customer_id) に対し、最終月以降を追加
+    pairs = df.groupby(["product_id", "customer_id"])
+    for (pid, cid), grp in pairs:
+        last_known = grp["forecast_month"].max()
+        # 直近の forecast_qty を参照値に
+        last_qty = int(grp[grp["forecast_month"] == last_known]["forecast_qty"].iloc[0])
+        m = last_known + pd.DateOffset(months=1)
+        while m <= target_end:
+            # 値はやや変動させる
+            new_qty = max(50, int(last_qty * rng.uniform(0.85, 1.15)))
+            acc = round(rng.uniform(0.70, 0.92), 4)
+            new_rows.append({
+                "forecast_id":   f"FC{next_id:06d}",
+                "product_id":    pid,
+                "customer_id":   cid,
+                "forecast_month": m.strftime("%Y-%m-%d"),
+                "forecast_qty":  new_qty,
+                "forecast_accuracy": acc,
+                "created_at":    TODAY.isoformat(),
+            })
+            next_id += 1
+            last_qty = new_qty
+            m = m + pd.DateOffset(months=1)
+
+    df["forecast_month"] = df["forecast_month"].dt.strftime("%Y-%m-%d")
+    df_ext = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
+    print(f"  → forecasts.csv 延長: +{len(new_rows)} 行 (〜2026-12)")
+    return df_ext
+
+
 def realign_purchase_orders(po_df: pd.DataFrame) -> pd.DataFrame:
     """1部材あたりの合計outstanding を PO_CAP_PER_COMP 個に均等キャップ。"""
     df = po_df.copy()
@@ -429,6 +478,10 @@ def main():
     po_df         = pd.read_csv(OUT / "purchase_orders.csv",   encoding="utf-8-sig")
 
     inventory_df["stock_qty"] = pd.to_numeric(inventory_df["stock_qty"], errors="coerce").fillna(0)
+
+    # ⓪ forecasts.csv を 2026-12 まで延長 (9ヶ月先までデモを網羅)
+    forecasts_df = extend_forecasts_to_2026_12(forecasts_df)
+    forecasts_df.to_csv(OUT / "forecasts.csv", index=False, encoding="utf-8-sig")
 
     # ① 倉庫マスタにマクニカ新子安を追加
     warehouses_df = add_macnica_warehouse(warehouses_df)

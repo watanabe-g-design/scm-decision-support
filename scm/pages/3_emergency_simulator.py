@@ -79,34 +79,19 @@ if components.empty:
     st.stop()
 
 with st.form("emergency_form"):
-    fc1, fc2 = st.columns(2)
-
-    # 1段階目: カテゴリ
-    with fc1:
-        cat_options = ["（すべて）"] + sorted([c for c in components["component_category"].dropna().unique()])
-        sel_cat = st.selectbox(
-            "① 🔍 部材カテゴリで絞り込み（候補数を減らすため）",
-            cat_options,
-        )
-
-    # 1段階目フィルター結果
-    if sel_cat != "（すべて）":
-        comp_filtered = components[components["component_category"] == sel_cat]
-    else:
-        comp_filtered = components
-
-    # 2段階目: 部材選択
-    with fc2:
-        comp_filtered_show = comp_filtered.copy()
-        comp_filtered_show["_label"] = (
-            comp_filtered_show["component_id"].astype(str)
-            + "  ｜  " + comp_filtered_show["part_number"].astype(str)
-            + "  ｜  " + comp_filtered_show["component_name"].astype(str)
-        )
-        sel_comp = st.selectbox(
-            f"② 🔧 部材を選択（候補 {len(comp_filtered_show)} 件、品番・名称で検索可能）",
-            comp_filtered_show["_label"].tolist(),
-        )
+    # 部材選択 (Phase 7: カテゴリ二段選択を廃止、直接検索で部材を選ぶ)
+    comp_show = components.copy()
+    comp_show["_label"] = (
+        comp_show["component_id"].astype(str)
+        + "  ｜  " + comp_show["part_number"].astype(str)
+        + "  ｜  " + comp_show["component_name"].astype(str)
+    )
+    comp_show = comp_show.sort_values("_label")
+    sel_comp = st.selectbox(
+        f"🔧 部材を選択（{len(comp_show)} 件、品番・部材名で検索可能）",
+        comp_show["_label"].tolist(),
+        help="ドロップダウン内の検索ボックスに品番や部材名を入力して絞り込めます",
+    )
 
     fc3, fc4 = st.columns(2)
     with fc3:

@@ -23,7 +23,10 @@ from components.sidebar import render_sidebar
 from components.today_banner import render_today_banner
 from components.route_comparison import render_route_comparison, render_route_legend
 from components.inventory_badge import render_inventory_legend
-from components.search_bar import render_search_bar, apply_component_search
+from components.search_bar import (
+    render_search_bar, render_component_selector,
+    apply_component_search, apply_component_id_filter,
+)
 from components.drill_down import pop_drill_filter
 from services.config import get_as_of_date
 from services.database import (
@@ -70,9 +73,13 @@ if demand.empty or options.empty:
     st.stop()
 
 # ────────────────────────────────────────────────────────
-# 検索バー
+# 検索 + 部材セレクタ (Phase 7: 部材カテゴリは撤廃)
 # ────────────────────────────────────────────────────────
-search_query = render_search_bar(components, key="action_search")
+sb1, sb2 = st.columns(2)
+with sb1:
+    search_query = render_search_bar(components, key="action_search")
+with sb2:
+    selected_comp_ids = render_component_selector(components, key="action_comp_sel")
 
 # ────────────────────────────────────────────────────────
 # 需要×部材の集約 (各需要に対する4ルート評価から「最良ルート」を選定)
@@ -116,9 +123,11 @@ agg["対応レベル"] = agg["action_level"].apply(action_level_label_jp) if "ac
 agg["発生源"] = agg["source_type"].apply(source_label_jp) if "source_type" in agg.columns else "—"
 agg["希望納期まで(日)"] = (pd.to_datetime(agg["requested_date"]) - pd.Timestamp(today)).dt.days
 
-# 検索フィルター適用
+# 検索 + 部材セレクタフィルター適用
 if search_query:
     agg = apply_component_search(agg, search_query)
+if selected_comp_ids:
+    agg = apply_component_id_filter(agg, selected_comp_ids)
 
 # ────────────────────────────────────────────────────────
 # フィルター（タイトル明確化）
@@ -204,18 +213,17 @@ else:
     df["_lv"] = df["action_level"].map(level_order).fillna(9) if "action_level" in df.columns else 9
     df = df.sort_values(["_lv", "希望納期まで(日)"]).drop(columns="_lv")
 
-    # 業務観点の列順: ID → 識別情報 → 緊急度 → 数量 → 対応情報
+    # 業務観点の列順 (部材カテゴリは廃止)
     show_cols = [
-        "demand_id",            # 需要ID
-        "part_number",          # 品番
-        "component_name",       # 部材名
-        "component_category",   # カテゴリ
+        "demand_id",
+        "part_number",
+        "component_name",
         "発生源",
-        "requested_date",       # 希望納期
+        "requested_date",
         "希望納期まで(日)",
-        "requested_qty",        # 必要数（業務観点で隣接配置）
-        "total_avail_4routes",  # 確保可能数
-        "total_shortage_4routes",  # 不足数（数量と隣接）
+        "requested_qty",
+        "total_avail_4routes",
+        "total_shortage_4routes",
         "対応レベル",
     ]
     cols_present = [c for c in show_cols if c in df.columns]
@@ -246,6 +254,7 @@ else:
         sel_demand_id = sel_label.split("  ｜  ", 1)[0].strip()
         sel_options = opt[opt["demand_id"] == sel_demand_id].copy()
         sel_demand = df_select[df_select["demand_id"] == sel_demand_id].iloc[0]
+        sel_comp_id = sel_demand["component_id"]
 
         # 4ルートカード
         render_route_comparison(
@@ -255,13 +264,26 @@ else:
         )
 
         # ────────────────────────────────────────────
+        # 顧客在庫の推移ビューへの遷移ボタン (Phase 7追加)
+        # ────────────────────────────────────────────
+        bc1, bc2 = st.columns([1, 3])
+        with bc1:
+            if st.button("📈 この部材の在庫推移を見る", key=f"goto_inv_{sel_demand_id}", use_container_width=True):
+                st.session_state["drill_filter"] = {"component_id": sel_comp_id}
+                st.switch_page("pages/8_inventory_health.py")
+        with bc2:
+            st.caption(
+                "💡 顧客在庫の月別推移（入荷・消費・予測在庫）を時系列で確認します。"
+                "前倒し消費の可否判断に活用してください。"
+            )
+
+        # ────────────────────────────────────────────
         # 💡 具体アクション提案（複数案を並列表示）
         # ────────────────────────────────────────────
         st.markdown("---")
         st.markdown("### 💡 具体アクション案（実行可能な選択肢を併記）")
         st.caption("各案には具体的な手順・数量・完了日を明示。比較してご判断ください。")
 
-        sel_comp_id = sel_demand["component_id"]
         lt_weeks = int(pd.to_numeric(sel_demand.get("base_lead_time_weeks", 20), errors="coerce") or 20)
         pull_in = estimate_pull_in_qty_from_next_month(
             component_id=sel_comp_id,

@@ -143,9 +143,13 @@ def render_route_comparison(
         elif shortage <= 0 and not is_in_time:
             status_icon = "🟡"
             status_text = f"数量充足・{days_late}日遅延"
-        elif shortage > 0 and is_in_time:
-            status_icon = "🟡"
-            status_text = f"間に合うが {shortage:,} 不足"
+        elif shortage > 0:
+            # 数量が不足 → 「間に合わない」のと同義として扱う (Phase 7修正)
+            status_icon = "🔴"
+            if days_late > 0:
+                status_text = f"不足 {shortage:,} ・ {days_late}日遅延"
+            else:
+                status_text = f"不足 {shortage:,}"
         else:
             status_icon = "🔴"
             status_text = f"不足 {shortage:,} ・ {days_late}日遅延"
