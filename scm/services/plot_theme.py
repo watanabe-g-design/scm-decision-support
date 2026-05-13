@@ -1,73 +1,44 @@
 """
-Plotly 共通レイアウト (ダーク / ライト 両対応)
-================================================
-全ページで統一感のあるチャートスタイルを提供する。
+Plotly 共通レイアウトモジュール (Phase 8 — Light Only)
+========================================================
+全ページのPlotlyチャートに一貫したスタイルを提供。
+ダークモード廃止につきライト値固定。
 
-設計方針 (博報堂的・洗練UI):
-  - 余白多め、グリッドは控えめ
-  - フォントは Inter / Hiragino Sans (system-ui)
-  - 軸線は薄く、データに集中させる
-  - レジェンドは右上 / hover label もテーマ準拠
+設計方針 (Hakuhodo-style):
+  - 背景: 純白、グリッドは極薄 (視覚ノイズ排除)
+  - フォント: Inter → Hiragino fallback
+  - グリッド: 水平方向のみ表示 (棒グラフ等)
+  - 余白: タイトルと軸ラベルに明確なスペース
 """
 from __future__ import annotations
 
-from styles import is_light_theme
+
+# ── ライト専用トークン ──────────────────────────────────────
+_T = {
+    "bg":     "#ffffff",
+    "paper":  "#ffffff",
+    "text":   "#0f172a",
+    "sub":    "#475569",
+    "grid":   "#f1f5f9",     # 極薄グリッド
+    "border": "#e2e8f0",
+    "blue":   "#2563eb",
+    "green":  "#059669",
+    "orange": "#d97706",
+    "red":    "#dc2626",
+    "purple": "#7c3aed",
+    "teal":   "#0891b2",
+    "amber":  "#b45309",
+    "pink":   "#db2777",
+}
+
+_FONT = "Inter, 'Noto Sans JP', -apple-system, 'Hiragino Sans', sans-serif"
 
 
-# ════════════════════════════════════════════════════════
-# テーマトークン
-# ════════════════════════════════════════════════════════
 def get_theme_tokens() -> dict:
-    """現在テーマの全カラートークンを返す"""
-    if is_light_theme():
-        return {
-            "bg":            "#ffffff",
-            "paper":         "#ffffff",
-            "panel":         "#fafbfc",
-            "panel2":        "#f6f8fa",
-            "border":        "#d8dee4",
-            "border_strong": "#afb8c1",
-            "text":          "#1f2328",
-            "text_sub":      "#656d76",
-            "text_muted":    "#8c959f",
-            "grid":          "#eaeef2",
-            "grid_strong":   "#d0d7de",
-            "blue":          "#0969da",
-            "green":         "#1a7f37",
-            "orange":        "#bf8700",
-            "red":           "#cf222e",
-            "purple":        "#8250df",
-            "blue_soft":     "#dbeafe",
-            "red_soft":      "#ffe2e2",
-            "green_soft":    "#dafbe1",
-        }
-    else:
-        return {
-            "bg":            "#0d1117",
-            "paper":         "#0d1117",
-            "panel":         "#161b22",
-            "panel2":        "#1c2128",
-            "border":        "#30363d",
-            "border_strong": "#484f58",
-            "text":          "#e6edf3",
-            "text_sub":      "#8b949e",
-            "text_muted":    "#6e7681",
-            "grid":          "#21262d",
-            "grid_strong":   "#30363d",
-            "blue":          "#58a6ff",
-            "green":         "#3fb950",
-            "orange":        "#f0883e",
-            "red":           "#ff7b72",
-            "purple":        "#bc8cff",
-            "blue_soft":     "#1c2c4d",
-            "red_soft":      "#3d1d20",
-            "green_soft":    "#1a2e1f",
-        }
+    """全トークンを返す (後方互換)。"""
+    return _T
 
 
-# ════════════════════════════════════════════════════════
-# Plotly 共通レイアウト (returns dict, mergeable)
-# ════════════════════════════════════════════════════════
 def base_layout(
     *,
     height: int = 380,
@@ -76,54 +47,59 @@ def base_layout(
     y_title: str | None = None,
     show_legend: bool = True,
     horizontal_grid_only: bool = False,
+    margin_left: int = 52,
 ) -> dict:
     """
-    全チャート共通のレイアウト辞書を返す。
+    全チャート共通レイアウト辞書。
     use: fig.update_layout(**base_layout(title="..."))
     """
-    t = get_theme_tokens()
-    layout = dict(
+    layout: dict = dict(
         height=height,
-        plot_bgcolor=t["bg"],
-        paper_bgcolor=t["paper"],
+        plot_bgcolor=_T["bg"],
+        paper_bgcolor=_T["paper"],
         font=dict(
-            family="Inter, -apple-system, 'Hiragino Sans', 'Yu Gothic UI', sans-serif",
-            color=t["text"],
+            family=_FONT,
+            color=_T["text"],
             size=12,
         ),
         xaxis=dict(
-            title=dict(text=x_title or "", font=dict(color=t["text_sub"], size=11)),
-            gridcolor=t["grid"] if not horizontal_grid_only else "rgba(0,0,0,0)",
-            linecolor=t["border_strong"],
-            tickfont=dict(color=t["text_sub"], size=11),
+            title=dict(text=x_title or "", font=dict(color=_T["sub"], size=11)),
+            gridcolor=_T["grid"] if not horizontal_grid_only else "rgba(0,0,0,0)",
+            linecolor=_T["border"],
+            tickfont=dict(color=_T["sub"], size=11),
             zeroline=False,
+            showgrid=not horizontal_grid_only,
             showspikes=False,
         ),
         yaxis=dict(
-            title=dict(text=y_title or "", font=dict(color=t["text_sub"], size=11)),
-            gridcolor=t["grid"],
-            linecolor=t["border_strong"],
-            tickfont=dict(color=t["text_sub"], size=11),
+            title=dict(text=y_title or "", font=dict(color=_T["sub"], size=11)),
+            gridcolor=_T["grid"],
+            linecolor=_T["border"],
+            tickfont=dict(color=_T["sub"], size=11),
             zeroline=False,
         ),
         legend=dict(
             orientation="h",
             yanchor="bottom", y=1.02,
             xanchor="right", x=1.0,
-            bgcolor="rgba(0,0,0,0)",
-            font=dict(color=t["text_sub"], size=11),
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor=_T["border"],
+            borderwidth=1,
+            font=dict(color=_T["sub"], size=11, family=_FONT),
         ) if show_legend else dict(visible=False),
         hoverlabel=dict(
-            bgcolor=t["panel"],
-            bordercolor=t["border"],
-            font=dict(color=t["text"], size=12, family="Inter, sans-serif"),
+            bgcolor=_T["paper"],
+            bordercolor=_T["border"],
+            font=dict(color=_T["text"], size=12, family=_FONT),
+            namelength=-1,
         ),
-        margin=dict(l=50, r=20, t=46 if title else 26, b=44),
+        margin=dict(l=margin_left, r=20, t=46 if title else 28, b=44),
+        colorway=palette(),
     )
     if title:
         layout["title"] = dict(
             text=title,
-            font=dict(color=t["text"], size=15, family="Inter, sans-serif"),
+            font=dict(color=_T["text"], size=15, family=_FONT, weight=600),
             x=0.0, xanchor="left",
             y=0.98, yanchor="top",
         )
@@ -131,7 +107,16 @@ def base_layout(
 
 
 def palette() -> list[str]:
-    """系列色パレット (順序固定)"""
-    t = get_theme_tokens()
-    return [t["blue"], t["orange"], t["green"], t["purple"], t["red"],
-            "#0a85a4", "#9e4f00", "#3c5af8", "#c08c47", "#9b1b30"]
+    """系列カラーパレット (順序固定, Hakuhodo-style)。"""
+    return [
+        _T["blue"],   # #2563eb
+        _T["orange"], # #d97706
+        _T["green"],  # #059669
+        _T["purple"], # #7c3aed
+        _T["red"],    # #dc2626
+        _T["teal"],   # #0891b2
+        _T["amber"],  # #b45309
+        _T["pink"],   # #db2777
+        "#374151",    # グレー
+        "#065f46",    # ダークグリーン
+    ]

@@ -57,10 +57,6 @@ def render_sidebar():
         st.page_link("pages/9_pipeline_health.py",             label="🔧 データパイプライン健全性")
 
         st.markdown("---")
-        st.caption("🎨 表示モード")
-        render_theme_toggle()
-
-        st.markdown("---")
         st.markdown(
             """<div style="font-size:10px;opacity:0.7;line-height:1.5;">
                 <b>このアプリは</b><br>

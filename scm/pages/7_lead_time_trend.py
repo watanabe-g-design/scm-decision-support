@@ -61,7 +61,8 @@ if snap.empty:
 
 # 型整え
 snap = snap.copy()
-for c in ("latest_lt_weeks", "lt_n1_weeks", "lt_n3_weeks", "lt_n6_weeks", "delta_vs_n1", "delta_vs_n3", "delta_vs_n6"):
+for c in ("latest_lt_weeks", "lt_n1_weeks", "lt_n3_weeks", "lt_n6_weeks",
+          "delta_vs_n1", "delta_vs_n3", "delta_vs_n6"):
     if c in snap.columns:
         snap[c] = pd.to_numeric(snap[c], errors="coerce").astype("Int64")
 
@@ -69,16 +70,60 @@ for c in ("latest_lt_weeks", "lt_n1_weeks", "lt_n3_weeks", "lt_n6_weeks", "delta
 # KPI
 # ────────────────────────────────────────────────────────
 n_total = len(snap)
-n_escal = len(escal) if not escal.empty else 0
 n_up_n3 = int((snap["trend_arrow_n3"] == "↑").sum()) if "trend_arrow_n3" in snap.columns else 0
 n_up_n6 = int((snap["trend_arrow_n6"] == "↑").sum()) if "trend_arrow_n6" in snap.columns else 0
 avg_lt  = float(snap["latest_lt_weeks"].dropna().astype(float).mean()) if not snap.empty else 0.0
 
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("📦 監視中部材", f"{n_total} 品目")
-k2.metric("⚠️ LT延長中（N-3↑）", f"{n_up_n3} 品目")
-k3.metric("🚨 LT延長中（N-6↑）", f"{n_up_n6} 品目")
-k4.metric("📊 平均LT", f"{avg_lt:.1f} 週")
+k1.metric("📦 監視中部材", f"{n_total} 品目",
+          help="LTスナップショットで監視されている部材の総数")
+k2.metric("⚠️ 3ヶ月前比で延長中", f"{n_up_n3} 品目",
+          help="3ヶ月前と比較してLTが増加している部材。新規発注タイミングを前倒し検討してください。")
+k3.metric("🚨 6ヶ月前比で延長中", f"{n_up_n6} 品目",
+          help="6ヶ月前と比較してLTが増加している部材。長期的な調達計画の見直しが必要です。")
+k4.metric("📊 平均LT", f"{avg_lt:.1f} 週",
+          help="全監視部材の現在リードタイムの平均値。")
+
+# ────────────────────────────────────────────────────────
+# 急騰アラート (LT変化が大きい部材を目立つカードで表示)
+# ────────────────────────────────────────────────────────
+if not escal.empty:
+    escal_top = escal.copy()
+    for c in ("delta_vs_n3", "delta_vs_n6"):
+        if c in escal_top.columns:
+            escal_top[c] = pd.to_numeric(escal_top[c], errors="coerce").fillna(0)
+    escal_top["_worst"] = escal_top[["delta_vs_n3", "delta_vs_n6"]].fillna(0).max(axis=1)
+    escal_top = escal_top.sort_values("_worst", ascending=False).head(5)
+
+    st.markdown("---")
+    st.markdown("### 🚨 LT急騰アラート（上位5件）")
+    st.caption(
+        "3ヶ月前または6ヶ月前と比較して、リードタイムが最も急増している部材です。"
+        "**新規発注タイミングの前倒しを即座に検討してください。**"
+    )
+    for _, row in escal_top.iterrows():
+        d3 = int(row.get("delta_vs_n3", 0) or 0)
+        d6 = int(row.get("delta_vs_n6", 0) or 0)
+        worst = max(d3, d6)
+        reason = str(row.get("escalation_reason", row.get("remark", "LT延長中")) or "LT延長中")
+        st.markdown(
+            f"""
+            <div class="lt-alert-card">
+                <div class="lt-alert-card-title">
+                    ⚠️ {row.get("item_code","—")} — {row.get("item_name","—")}
+                    <span style="margin-left:12px;font-size:13px;font-weight:400;">
+                        現在 <strong>{int(row.get("latest_lt_weeks",0) or 0)}週</strong>
+                        (3ヶ月前比 +{d3}週 / 6ヶ月前比 +{d6}週)
+                    </span>
+                </div>
+                <div class="lt-alert-card-body">{reason}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+else:
+    st.markdown("---")
+    st.success("✅ LT急騰アラートはありません。すべての部材のLTは安定しています。")
 
 st.markdown("---")
 

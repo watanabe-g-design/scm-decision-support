@@ -21,28 +21,28 @@ from styles import is_light_theme
 ROUTE_META: dict[str, dict[str, str]] = {
     "CUSTOMER_STOCK": {
         "label_jp": "① 顧客側在庫",
-        "color":    "#58a6ff",
+        "color":    "#2563eb",   # アクセントブルー (ライト)
         "icon":     "🏭",
         "desc":     "自社倉庫の在庫から引当（即時）",
         "tooltip":  "顧客の自社倉庫が現在保有している在庫。今日すぐ利用可能。今後の他需要による消費見込みを差し引いた『実効在庫』を表示。",
     },
     "MACNICA_FREE": {
         "label_jp": "② マクニカフリー在庫",
-        "color":    "#2ea043",
+        "color":    "#059669",   # エメラルドグリーン (ライト)
         "icon":     "📦",
         "desc":     "マクニカが顧客向けに引当済の在庫",
         "tooltip":  "マクニカ側がこの顧客向けに事前に引当済の在庫。マクニカ営業に相談すれば通常LTを待たずに出荷手配可能。",
     },
     "EXISTING_PO": {
         "label_jp": "③ 既存発注残BL",
-        "color":    "#ffa000",
+        "color":    "#d97706",   # アンバー (ライト)
         "icon":     "📑",
         "desc":     "マクニカからメーカーへ既発注分を催促",
         "tooltip":  "マクニカが既にメーカーへ発注済の未入荷分。最早の入荷予定日を表示。遅延がある場合は『要相談』表示。",
     },
     "NEW_ORDER": {
         "label_jp": "④ 新規追加発注",
-        "color":    "#bc8cff",
+        "color":    "#7c3aed",   # パープル (ライト)
         "icon":     "🆕",
         "desc":     "新規にメーカーへ追加発注（LT考慮）",
         "tooltip":  "今から追加でメーカーへ発注する場合のオプション。部材ごとのリードタイム（base_lead_time_weeks）を考慮したETAを表示。",
@@ -87,17 +87,11 @@ def render_route_comparison(
     df["_order"] = df["route_type"].map({k: i for i, k in enumerate(ROUTE_META.keys())})
     df = df.sort_values("_order").drop(columns="_order")
 
-    # テーマカラー
-    if is_light_theme():
-        card_bg = "#f6f8fa"
-        border = "#d0d7de"
-        text_main = "#1f2328"
-        text_sub = "#656d76"
-    else:
-        card_bg = "#1c2128"
-        border = "#30363d"
-        text_main = "#e6edf3"
-        text_sub = "#8b949e"
+    # ライト専用カラー (Phase 8 ダークモード廃止)
+    card_bg = "#ffffff"
+    border = "#e2e8f0"
+    text_main = "#0f172a"
+    text_sub = "#475569"
 
     st.markdown(
         f"""

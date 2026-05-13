@@ -20,18 +20,12 @@ def render_today_banner(extra_note: str | None = None) -> None:
     label = get_as_of_date_label_jp()
     iso = get_as_of_date().isoformat()
 
-    if is_light_theme():
-        bg = "linear-gradient(90deg, #eaeef2 0%, #f6f8fa 100%)"
-        border = "#d0d7de"
-        accent = "#0969da"
-        text_main = "#1f2328"
-        text_sub = "#656d76"
-    else:
-        bg = "linear-gradient(90deg, #1c2128 0%, #161b22 100%)"
-        border = "#30363d"
-        accent = "#58a6ff"
-        text_main = "#e6edf3"
-        text_sub = "#8b949e"
+    # ライト専用 (Phase 8 ダークモード廃止)
+    bg = "linear-gradient(90deg, #eff6ff 0%, #f8fafc 100%)"
+    border = "#bfdbfe"
+    accent = "#2563eb"
+    text_main = "#0f172a"
+    text_sub = "#475569"
 
     extra_html = ""
     if extra_note:

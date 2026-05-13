@@ -303,19 +303,55 @@ else:
 
         if action_opts:
             for i, opt_a in enumerate(action_opts[:5], start=1):
-                with st.container():
-                    st.markdown(
-                        f"**{opt_a.title}** ｜ 確実度: `{opt_a.feasibility}` ｜ 充足: {opt_a.coverage_qty:,}個"
-                        + (f" / 未充足: {opt_a.gap_qty:,}個" if opt_a.gap_qty else "")
-                        + f" ｜ 完了日: **{opt_a.eta_date.isoformat()}**"
-                    )
-                    for step in opt_a.steps:
-                        st.markdown(f"&emsp;• {step}", unsafe_allow_html=True)
-                    st.markdown("")
+                feas_color = {
+                    "確実": "#059669", "見込み": "#d97706", "要相談": "#dc2626"
+                }.get(opt_a.feasibility, "#475569")
+                badge_cls = {
+                    "確実": "priority-ok", "見込み": "priority-medium", "要相談": "priority-critical"
+                }.get(opt_a.feasibility, "priority-medium")
+                steps_html = "".join(
+                    f'<li style="display:flex;gap:8px;align-items:flex-start;margin-bottom:5px;">'
+                    f'<span style="min-width:18px;height:18px;background:#f1f5f9;border-radius:50%;'
+                    f'display:flex;align-items:center;justify-content:center;font-size:10px;'
+                    f'font-weight:700;color:#475569;flex-shrink:0;margin-top:2px;">{j}</span>'
+                    f'<span style="font-size:13px;color:#475569;line-height:1.5;">{s}</span></li>'
+                    for j, s in enumerate(opt_a.steps, 1)
+                )
+                gap_html = (
+                    f'<div style="flex-direction:column;gap:2px;">'
+                    f'<div style="font-size:10px;font-weight:500;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">未充足</div>'
+                    f'<div style="font-size:18px;font-weight:700;color:#dc2626;letter-spacing:-0.02em;">{opt_a.gap_qty:,}個</div>'
+                    f'</div>'
+                ) if opt_a.gap_qty > 0 else ""
+
+                st.markdown(
+                    f"""
+                    <div class="action-card">
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+                            <span style="font-size:11px;font-weight:700;color:#94a3b8;">案{i}</span>
+                            <span style="font-size:15px;font-weight:600;color:#0f172a;flex:1;">{opt_a.title}</span>
+                            <span class="{badge_cls}">{opt_a.feasibility}</span>
+                        </div>
+                        <div style="display:flex;gap:24px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #e2e8f0;">
+                            <div style="display:flex;flex-direction:column;gap:2px;">
+                                <div style="font-size:10px;font-weight:500;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">充足数量</div>
+                                <div style="font-size:18px;font-weight:700;color:#059669;letter-spacing:-0.02em;">{opt_a.coverage_qty:,}個</div>
+                            </div>
+                            {gap_html}
+                            <div style="display:flex;flex-direction:column;gap:2px;">
+                                <div style="font-size:10px;font-weight:500;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">完了予定日</div>
+                                <div style="font-size:18px;font-weight:700;color:#0f172a;letter-spacing:-0.02em;">{opt_a.eta_date.isoformat()}</div>
+                            </div>
+                        </div>
+                        <ul style="list-style:none;padding:0;margin:0;">{steps_html}</ul>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
         # 補助情報
         st.caption(
-            f"💡 部材: {sel_demand.get('component_name', '—')} ({sel_demand.get('part_number', '—')})"
-            f" ｜ 発生源: {sel_demand.get('発生源', '—')}"
-            f" ｜ メモ: {sel_demand.get('note', '') or '—'}"
+            f"部材: {sel_demand.get('component_name', '—')} ({sel_demand.get('part_number', '—')})"
+            f"  ｜  発生源: {sel_demand.get('発生源', '—')}"
+            f"  ｜  メモ: {sel_demand.get('note', '') or '—'}"
         )

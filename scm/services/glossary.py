@@ -79,10 +79,10 @@ ROUTE_LABEL = {
 # 3. 対応レベルの業務用語表現
 # ════════════════════════════════════════════════════════
 ACTION_LEVEL_LABEL = {
-    "不要": "自社在庫で対応可",
-    "軽":   "単一ルート相談で対応可",
-    "中":   "複数ルート組合せ要相談",
-    "重":   "新規発注必要（LT考慮）",
+    "不要": "OK",
+    "軽":   "Medium",
+    "中":   "High",
+    "重":   "Critical",
 }
 
 ACTION_LEVEL_ICON = {
@@ -90,6 +90,14 @@ ACTION_LEVEL_ICON = {
     "軽":   "🟡",
     "中":   "🟠",
     "重":   "🔴",
+}
+
+# アクションレベルの業務的説明 (ダッシュボードKPIのhelp文に使用)
+ACTION_LEVEL_HELP = {
+    "重":   "今すぐ新規発注が必要。LTを考慮すると納期に間に合わない可能性が高く、最優先で対応してください。",
+    "中":   "今週中にマクニカへ相談が必要。既存在庫ルートの組み合わせで対応可能ですが、確認が必要です。",
+    "軽":   "来週までに確認。既存のPO催促またはマクニカフリー在庫で単独対応可能。",
+    "不要": "顧客在庫で充足。現状このまま進めてOKです。",
 }
 
 
@@ -197,10 +205,15 @@ def route_label_jp(route_type: str) -> str:
 
 
 def action_level_label_jp(level: str) -> str:
-    """対応レベルの業務用語表示 (アイコン付き)"""
+    """対応レベルの表示 (アイコン + Critical/High/Medium/OK)"""
     icon = ACTION_LEVEL_ICON.get(level, "")
     label = ACTION_LEVEL_LABEL.get(level, level)
     return f"{icon} {label}"
+
+
+def action_level_help(level: str) -> str:
+    """対応レベルの業務的説明文"""
+    return ACTION_LEVEL_HELP.get(level, "")
 
 
 def source_label_jp(source: str) -> str:
