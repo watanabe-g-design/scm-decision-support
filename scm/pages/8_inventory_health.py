@@ -96,7 +96,7 @@ today_month = today.strftime("%Y-%m")
 proj_display = proj[proj["month_end_date"] >= today_month].copy()
 
 # ────────────────────────────────────────────────────────
-# KPI
+# KPI: 需給バランス全体像 (健全性スコア中心)
 # ────────────────────────────────────────────────────────
 breach_df = breach.copy() if not breach.empty else pd.DataFrame()
 n_zero = int((breach_df["breach_type"] == "ZERO").sum())  if not breach_df.empty else 0
@@ -104,11 +104,62 @@ n_under = int((breach_df["breach_type"] == "UNDER").sum()) if not breach_df.empt
 n_over = int((breach_df["breach_type"] == "OVER").sum())  if not breach_df.empty else 0
 n_managed = int(proj_display["item_id"].nunique())
 
+# 健全性スコア: OK 状態の component×month の比率
+total_evaluated = len(proj_display)
+n_ok = int((proj_display["policy_status"] == "OK").sum()) if total_evaluated else 0
+health_pct = round(n_ok / total_evaluated * 100, 1) if total_evaluated else 0.0
+
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("📦 管理部材数", f"{n_managed} 品目")
-k2.metric("🔴 在庫ZERO予測", f"{n_zero} 件")
-k3.metric("🟠 安全在庫割れ予測", f"{n_under} 件")
-k4.metric("🟡 過剰在庫予測", f"{n_over} 件")
+k1.metric(
+    "🩺 在庫健全性スコア",
+    f"{health_pct} %",
+    help="月末予測在庫が安全在庫レンジ内（min ≤ 在庫 ≤ max）の比率。65-75%が現実的に健全な水準。",
+)
+k2.metric("📦 管理部材数", f"{n_managed} 品目")
+k3.metric("🔴 在庫ZERO予測", f"{n_zero} 件",
+          help="6ヶ月以内に予測在庫が0以下となる部材×月の件数。新規発注が必要。")
+k4.metric("🟠 安全在庫割れ予測", f"{n_under} 件",
+          help="6ヶ月以内に予測在庫が安全在庫を割る部材×月の件数。発注タイミング前倒し検討。")
+
+# ────────────────────────────────────────────────────────
+# 需給バランス インサイト (上位リスク部材を可視化)
+# ────────────────────────────────────────────────────────
+st.markdown("")
+st.markdown("#### 📌 今すぐ確認すべき部材 (上位リスク3件)")
+st.caption("健全性に最も影響している部材を抽出。クリックで個別ビューに展開。")
+
+if not breach_df.empty:
+    risk_top = breach_df.copy()
+    risk_top["projected_stock"] = pd.to_numeric(risk_top["projected_stock"], errors="coerce").fillna(0)
+    # ZERO -> UNDER -> OVER の順、かつ first_breach が早い順
+    type_order = {"ZERO": 0, "UNDER": 1, "OVER": 2}
+    risk_top["_o"] = risk_top["breach_type"].map(type_order).fillna(9)
+    risk_top = risk_top.sort_values(["_o", "first_breach"]).drop_duplicates(subset=["item_id"]).head(3)
+
+    cols = st.columns(3)
+    for col, (_, row) in zip(cols, risk_top.iterrows()):
+        breach_type = row.get("breach_type", "ZERO")
+        breach_color = {"ZERO": "#dc2626", "UNDER": "#d97706", "OVER": "#7c3aed"}.get(breach_type, "#475569")
+        breach_label = {"ZERO": "在庫ゼロ予測", "UNDER": "安全在庫割れ", "OVER": "過剰在庫"}.get(breach_type, "—")
+        with col:
+            st.markdown(
+                f"""
+                <div class="biz-card" style="border-left:4px solid {breach_color};">
+                    <div style="font-size:11px;font-weight:600;color:{breach_color};text-transform:uppercase;letter-spacing:0.6px;">{breach_label}</div>
+                    <div style="font-size:15px;font-weight:600;color:#0f172a;margin:4px 0 8px;">
+                        {row.get('item_code', '—')}<br>
+                        <span style="font-size:13px;font-weight:400;color:#475569;">{row.get('product_name', '—')}</span>
+                    </div>
+                    <div style="font-size:12px;color:#475569;">
+                        初回発生月: <strong style="color:#0f172a;">{row.get('first_breach', '—')}</strong><br>
+                        予測在庫: <strong style="color:{breach_color};">{int(row.get('projected_stock', 0)):,}個</strong> (安全在庫 {int(row.get('min_qty', 0)):,})
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+else:
+    st.success("✅ リスク部材はありません。全部材が安全在庫レンジ内で推移する見込みです。")
 
 st.markdown("---")
 

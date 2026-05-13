@@ -249,8 +249,8 @@ if submit:
             verdict = "✅ 単独で完全充足可能"
         elif r["shortage_qty"] <= 0:
             verdict = f"⏰ 数量は確保可だが {r['days_late']} 日遅延"
-        elif r["is_in_time"]:
-            verdict = f"📉 納期は間に合うが {r['shortage_qty']:,} 個不足"
+        elif r["shortage_qty"] > 0 and r["days_late"] == 0:
+            verdict = f"📉 不足 {r['shortage_qty']:,} 個"
         else:
             verdict = f"❌ 不足 {r['shortage_qty']:,} 個 + {r['days_late']} 日遅延"
         summary.append({"ルート": label, "判定": verdict, "ETA": r["eta_date"].isoformat()})

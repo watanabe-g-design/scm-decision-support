@@ -37,6 +37,7 @@ def render_sidebar():
 
         st.caption("【意思決定フロー】")
         st.page_link("app.py",                                 label="📊 総合ダッシュボード")
+        st.page_link("pages/0_commit_dashboard.py",            label="📌 納期コミット (顧客)")
         st.page_link("pages/1_demand_timeline.py",             label="📅 製品FCST × 部材必要量")
         st.page_link("pages/2_action_center.py",               label="🎯 調達アクションセンター")
         st.page_link("pages/3_emergency_simulator.py",         label="🚨 緊急調達シミュレーター")

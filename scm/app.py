@@ -32,6 +32,7 @@ from services.database import (
     get_lt_escalation,
     get_bom_fulfillment_status,
     get_pipeline_health,
+    get_order_commit_risk,
 )
 from services.kpi_logic import (
     filter_by_period,
@@ -62,6 +63,7 @@ with st.spinner("データを読み込んでいます..."):
     lt_escal   = get_lt_escalation()
     bom_fulfill = get_bom_fulfillment_status()
     pipe_health = get_pipeline_health()
+    commit_risk = get_order_commit_risk()
 
 today = get_as_of_date()
 
@@ -93,6 +95,54 @@ sel_period = st.radio(
 period_days = period_options[sel_period]
 
 demand_filtered = filter_by_period(demand, "requested_date", today, period_days, past_buffer_days=0)
+
+st.markdown("---")
+
+# ────────────────────────────────────────────────────────
+# Section 0: 📌 納期コミット (顧客への納期コミット — 最優先)
+# ────────────────────────────────────────────────────────
+st.markdown("### 📌 顧客への納期コミット (いつまでに何をすべきか)")
+st.caption(
+    "顧客から受注した案件の納期コミット状況。"
+    "**Critical = 残3日以内 / High = 残7日以内** が今日〜今週中に動くべき最優先案件です。"
+)
+
+if not commit_risk.empty:
+    cr = commit_risk.copy()
+    cr["days_to_due"] = pd.to_numeric(cr.get("days_to_due", 0), errors="coerce").fillna(0)
+    n_cr_crit = int((cr["priority_rank"] == "Critical").sum())
+    n_cr_high = int((cr["priority_rank"] == "High").sum())
+    n_cr_mid  = int((cr["priority_rank"] == "Mid").sum())
+    n_cr_low  = int((cr["priority_rank"] == "Low").sum())
+
+    cc1, cc2, cc3, cc4 = st.columns(4)
+    with cc1:
+        st.metric(
+            "🔴 Critical (残3日以内)",
+            f"{n_cr_crit} 件",
+            help="納期まで残3日以内。今すぐ動かないと納期遅延の可能性が高い受注。",
+        )
+        render_drill_down_button("今すぐ確認する", "pages/0_commit_dashboard.py",
+                                  filter_payload={"priority": "Critical"}, key="drill_cr_crit")
+    with cc2:
+        st.metric(
+            "🟠 High (残7日以内)",
+            f"{n_cr_high} 件",
+            help="納期まで残7日以内。今週中にマクニカへ相談・前倒し調整。",
+        )
+        render_drill_down_button("今週中に対応", "pages/0_commit_dashboard.py",
+                                  filter_payload={"priority": "High"}, key="drill_cr_high")
+    with cc3:
+        st.metric("🟡 Mid (残14日以内)", f"{n_cr_mid} 件",
+                  help="納期まで残14日以内。来週までに方針確定。")
+    with cc4:
+        st.metric("🟢 Low (残15日以上)", f"{n_cr_low} 件",
+                  help="納期まで残15日以上。状況モニタリング段階。")
+    st.markdown("")
+    if n_cr_crit + n_cr_high == 0:
+        st.success("✅ 残7日以内のCritical/High案件はありません。本日は通常運用でOK。")
+else:
+    st.info("gold_order_commit_risk が未生成です。受注データを確認してください。")
 
 st.markdown("---")
 

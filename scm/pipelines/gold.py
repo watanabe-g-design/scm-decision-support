@@ -218,6 +218,7 @@ def gold_order_commit_risk():
       remaining_qty, requested_delivery_date, response_date,
       earliest_ship_date, deadline_date, partial_available_qty,
       current_customer_stock, current_trading_house_stock,
+      days_to_due,
       CASE
         WHEN days_to_due IS NULL THEN 'Low'
         WHEN days_to_due <= 3  THEN 'Critical'

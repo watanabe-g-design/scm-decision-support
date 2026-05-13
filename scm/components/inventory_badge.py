@@ -13,19 +13,19 @@ from __future__ import annotations
 import streamlit as st
 
 
-# 在庫種別の定義
+# 在庫種別の定義 (Phase 8 ライト専用カラー)
 INVENTORY_KIND_META: dict[str, dict[str, str]] = {
     "CUSTOMER": {
         "label_jp": "顧客在庫",
-        "color":    "#58a6ff",   # 青
+        "color":    "#2563eb",   # アクセントブルー
         "icon":     "🏭",
         "desc":     "顧客自身が保有する自社倉庫内の在庫",
     },
     "MACNICA": {
         "label_jp": "マクニカフリー在庫",
-        "color":    "#2ea043",   # 緑
+        "color":    "#059669",   # エメラルドグリーン
         "icon":     "📦",
-        "desc":     "マクニカが顧客向けに引当済の在庫 (マクニカ倉庫保有)",
+        "desc":     "マクニカが顧客向けに引当済の在庫 (マクニカ新子安保管)",
     },
 }
 
@@ -43,19 +43,19 @@ def inventory_badge_html(kind: str, *, with_desc: bool = False) -> str:
     """
     meta = INVENTORY_KIND_META.get(kind, {})
     label = meta.get("label_jp", kind)
-    color = meta.get("color", "#8b949e")
+    color = meta.get("color", "#475569")
     icon = meta.get("icon", "•")
 
     badge = (
-        f'<span style="background:{color}22;color:{color};'
+        f'<span style="background:{color}1a;color:{color};'
         f'padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;'
-        f'border:1px solid {color}55;">'
+        f'border:1px solid {color}33;">'
         f"{icon} {label}</span>"
     )
 
     if with_desc:
         desc = meta.get("desc", "")
-        return badge + f' <span style="font-size:10px;color:#8b949e;">{desc}</span>'
+        return badge + f' <span style="font-size:10px;color:#475569;">{desc}</span>'
     return badge
 
 
