@@ -202,14 +202,20 @@ def gen_purchase_orders_smart(
     fc = forecasts_df.copy()
     fc["forecast_month"] = pd.to_datetime(fc["forecast_month"], format="mixed", errors="coerce").dt.date
 
+    # 未来月のみを対象 (今日以降。過去の薄いデータで平均が下がるのを防ぐ)
+    fc_future = fc[fc["forecast_month"] > TODAY].copy()
+    if fc_future.empty:
+        fc_future = fc.copy()
+
     comp_monthly = (
-        fc.merge(bom_df[["product_id", "component_id", "quantity_per_unit"]], on="product_id")
+        fc_future.merge(bom_df[["product_id", "component_id", "quantity_per_unit"]], on="product_id")
         .assign(comp_qty=lambda x: x["forecast_qty"] * x["quantity_per_unit"])
         .groupby(["component_id", "forecast_month"])["comp_qty"].sum()
         .reset_index()
     )
-    # 部材ごとの平均月次消費
-    avg_consumption = comp_monthly.groupby("component_id")["comp_qty"].mean().to_dict()
+    # ピーク値の80%を基準 (安定した高めのカバレッジ)
+    peak_consumption = comp_monthly.groupby("component_id")["comp_qty"].max()
+    avg_consumption = (peak_consumption * 0.8).to_dict()
 
     # 対象月: 2026-04 〜 2026-12
     months_future = []
@@ -222,11 +228,16 @@ def gen_purchase_orders_smart(
     # 部材×サプライヤーマッピング (components.csvからsupplier_idを取得)
     comp_supplier = components_df.set_index("component_id")[["supplier_id", "unit_price_usd", "base_lead_time_weeks"]].to_dict("index")
 
+    # 目標: 健全性70% = Group A(53%) + B/C/Dの一部
+    # A: 100-105%でinit=(min+max)/2→常にOK範囲に留まる
+    # B: 115%でmax寄りinit→上昇傾向だが範囲内が多い
+    # C: 75-80%でmin*1.2init→下降傾向 → 後半UNDER
+    # D: 20-25%→ZERO
     coverage_params = {
-        "A": (1.00, 1.20),
-        "B": (1.60, 2.00),
-        "C": (0.50, 0.65),
-        "D": (0.10, 0.20),
+        "A": (1.00, 1.05),   # ほぼ100%: initが(min+max)/2なら7ヶ月OK維持
+        "B": (1.10, 1.20),   # 110-120%: max寄りinitから緩やかに上昇→後半OVER傾向
+        "C": (0.85, 0.92),   # 85-92%: (min+max)/2 initから徐々に下降→後半のみUNDER/ZERO
+        "D": (0.18, 0.28),   # ZERO傾向
     }
 
     rows = []
@@ -337,13 +348,17 @@ def adjust_inventory_for_scenarios(
             continue
 
         if grp == "A":
-            target_total = rng.randint(int(min_s * 1.05), int(min_s * 1.4))
+            # (min+max)/2 付近 → 100%PO coverage で7ヶ月OK安定
+            target_total = rng.randint(int((min_s + max_s) * 0.45), int((min_s + max_s) * 0.55))
         elif grp == "B":
-            target_total = rng.randint(int(max_s * 0.85), int(max_s * 1.1))
+            # max*0.75-0.90 → 110-120%PO で緩やかに上昇、後半OVER傾向
+            target_total = rng.randint(int(max_s * 0.75), int(max_s * 0.90))
         elif grp == "C":
-            target_total = rng.randint(int(min_s * 0.6), int(min_s * 0.9))
-        else:  # D (含 doomed, partial)
-            target_total = rng.randint(int(min_s * 0.05), int(min_s * 0.15))
+            # (min+max)/2 付近 → 88%PO で徐々に下降、5-6ヶ月はOK
+            target_total = rng.randint(int((min_s + max_s) * 0.44), int((min_s + max_s) * 0.54))
+        else:  # D (含 doomed)
+            # min*0.1-0.2 → ZERO 傾向
+            target_total = rng.randint(int(min_s * 0.10), int(min_s * 0.20))
 
         current_total = int(df.loc[mask, "stock_qty"].sum())
         if current_total == 0:

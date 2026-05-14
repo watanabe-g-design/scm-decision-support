@@ -113,10 +113,11 @@ if not escal.empty:
         # 業務的な表現: "新規発注は通常より N 週早めに開始してください"
 
         # 影響想定: 現在LTを反映した「今日発注→入荷見込み」
-        eta_iso = (today + pd.Timedelta(weeks=latest_lt)).date().isoformat()
+        from datetime import timedelta as _td
+        eta_iso = (today + _td(weeks=int(latest_lt))).isoformat()
         # 比較として、N-3LT を使った旧見込みも参考表示
         old_lt = int(row.get("lt_n3_weeks", latest_lt - d3) or (latest_lt - d3))
-        old_eta_iso = (today + pd.Timedelta(weeks=max(old_lt, 1))).date().isoformat()
+        old_eta_iso = (today + _td(weeks=int(max(old_lt, 1)))).isoformat()
 
         reason = str(row.get("escalation_reason", row.get("remark", "LT延長中")) or "LT延長中")
         st.markdown(

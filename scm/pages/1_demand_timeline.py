@@ -235,10 +235,13 @@ with tab2:
             else:
                 st.info("上のセレクタから製品を選んでください。")
 
-# ─── Tab 3: 緊急手動入力 & 要対応Top10 ─────────────────────────────
+# ─── Tab 3: 緊急手動入力 (Top10は削除: 調達アクションセンターに統合) ──
 with tab3:
     st.markdown("#### 🚨 緊急手動入力の明細")
-    st.caption("営業FCSTから漏れた、突発的に発生した需要のリスト。")
+    st.caption(
+        "営業FCSTから漏れた突発的な需要のリスト。"
+        "各案件の**4ルート評価・具体アクション案**は「🎯 調達アクションセンター」で確認できます。"
+    )
     emerg = df[df["source_type"] == "EMERGENCY_MANUAL"].copy()
     if emerg.empty:
         st.info("条件に該当する緊急手動入力はありません。")
@@ -254,38 +257,36 @@ with tab3:
         st.dataframe(show, hide_index=True, use_container_width=True)
         st.caption(f"💡 緊急需要 {len(emerg)} 件。各案件の調達評価は「🎯 調達アクションセンター」へ。")
 
-    st.markdown("#### 🎯 直近30日で要対応の需要 Top 10")
-    st.caption("今日から30日以内に納期で、顧客在庫だけでは賄えない需要。朝一の優先対応リスト。")
-    if not options.empty and not df.empty:
-        opt = options.copy()
-        opt["requested_date"] = pd.to_datetime(opt["requested_date"], errors="coerce").dt.date
-        opt["shortage_qty"] = pd.to_numeric(opt["shortage_qty"], errors="coerce").fillna(0)
-        opt["_score"] = opt["shortage_qty"].clip(lower=0) * 1000
-        best = opt.sort_values("_score").groupby("demand_id").first().reset_index()
-        cutoff = today + timedelta(days=30)
-        needs = best[(best["requested_date"] >= today) & (best["requested_date"] <= cutoff)].copy()
-        if "action_level" in needs.columns:
-            needs = needs[needs["action_level"] != "不要"]
-        needs = needs.sort_values("shortage_qty", ascending=False).head(10)
-        if needs.empty:
-            st.success("✅ 直近30日に要対応の需要はありません。")
-        else:
-            if not components.empty:
-                needs = needs.merge(
-                    components[["component_id", "part_number", "component_name"]],
-                    on="component_id", how="left",
-                )
-            from services.glossary import action_level_label_jp
+    if False:  # U2: Top10 削除 (調達アクションセンターに統合済み)
+        st.markdown("dummy")
+        if not options.empty and not df.empty:
+            opt = options.copy()
+            opt["requested_date"] = pd.to_datetime(opt["requested_date"], errors="coerce").dt.date
+            opt["shortage_qty"] = pd.to_numeric(opt["shortage_qty"], errors="coerce").fillna(0)
+            opt["_score"] = opt["shortage_qty"].clip(lower=0) * 1000
+            best = opt.sort_values("_score").groupby("demand_id").first().reset_index()
+            cutoff = today + timedelta(days=30)
+            needs = best[(best["requested_date"] >= today) & (best["requested_date"] <= cutoff)].copy()
             if "action_level" in needs.columns:
-                needs["Priority"] = needs["action_level"].apply(action_level_label_jp)
-            show_c = [("part_number","品番"),("component_name","部材名"),
-                      ("requested_date","希望納期"),("requested_qty","必要数"),
-                      ("shortage_qty","不足数"),("Priority","Priority")]
-            cols_p = [(k,v) for k,v in show_c if k in needs.columns]
-            st.dataframe(
-                needs[[k for k,_ in cols_p]].rename(columns=dict(cols_p)),
-                hide_index=True, use_container_width=True,
-            )
-            st.caption("💡 全件確認 + 詳細評価は「🎯 調達アクションセンター」へ。")
-    else:
-        st.info("gold_procurement_options が未生成です。")
+                needs = needs[needs["action_level"] != "不要"]
+            needs = needs.sort_values("shortage_qty", ascending=False).head(10)
+            if needs.empty:
+                st.success("✅ 直近30日に要対応の需要はありません。")
+            else:
+                if not components.empty:
+                    needs = needs.merge(
+                        components[["component_id", "part_number", "component_name"]],
+                        on="component_id", how="left",
+                    )
+                from services.glossary import action_level_label_jp
+                if "action_level" in needs.columns:
+                    needs["Priority"] = needs["action_level"].apply(action_level_label_jp)
+                show_c = [("part_number","品番"),("component_name","部材名"),
+                          ("requested_date","希望納期"),("requested_qty","必要数"),
+                          ("shortage_qty","不足数"),("Priority","Priority")]
+                cols_p = [(k,v) for k,v in show_c if k in needs.columns]
+                st.dataframe(
+                    needs[[k for k,_ in cols_p]].rename(columns=dict(cols_p)),
+                    hide_index=True, use_container_width=True,
+                )
+                st.caption("💡 全件確認 + 詳細評価は「🎯 調達アクションセンター」へ。")

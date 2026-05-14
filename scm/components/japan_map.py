@@ -137,14 +137,14 @@ routes.forEach(function(r){{
 // Warehouse markers
 warehouses.forEach(function(wh){{
   var color=(wh.crit>0||wh.health<50)?"#dc2626":wh.health<75?"#d97706":"#059669";
-  var size=Math.max(12,Math.min(24,12+Math.log10(Math.max(wh.stock,10)/100+1)*10));
+  var size=Math.max(10,Math.min(20,10+Math.log10(Math.max(wh.stock,10)/100+1)*7));
   if(wh.crit>0||wh.health<50)critC++;else if(wh.health>=75)okC++;else highC++;
 
   var icon=L.divIcon({{className:"",
     html:'<svg width="'+(size*2)+'" height="'+(size*2)+'" viewBox="0 0 '+(size*2)+' '+(size*2)+'">'
-      +'<circle cx="'+size+'" cy="'+size+'" r="'+(size*1.3)+'" fill="'+color+'" opacity="0.15"/>'
-      +'<circle cx="'+size+'" cy="'+size+'" r="'+size+'" fill="none" stroke="'+color+'" stroke-width="2.5" opacity="0.85"/>'
-      +'<circle cx="'+size+'" cy="'+size+'" r="'+(size*0.65)+'" fill="'+color+'" opacity="0.95"/></svg>',
+      +'<circle cx="'+size+'" cy="'+size+'" r="'+(size*0.95)+'" fill="'+color+'" opacity="0.10"/>'
+      +'<circle cx="'+size+'" cy="'+size+'" r="'+(size*0.80)+'" fill="none" stroke="'+color+'" stroke-width="2" opacity="0.80"/>'
+      +'<circle cx="'+size+'" cy="'+size+'" r="'+(size*0.50)+'" fill="'+color+'" opacity="0.90"/></svg>',
     iconSize:[size*2,size*2],iconAnchor:[size,size]}});
 
   var healthClass=wh.crit>0?"a-crit":wh.health<75?"a-warn":"a-ok";

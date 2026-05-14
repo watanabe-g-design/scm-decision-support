@@ -15,20 +15,24 @@ from __future__ import annotations
 
 # ── ライト専用トークン ──────────────────────────────────────
 _T = {
-    "bg":     "#ffffff",
-    "paper":  "#ffffff",
-    "text":   "#0f172a",
-    "sub":    "#475569",
-    "grid":   "#f1f5f9",     # 極薄グリッド
-    "border": "#e2e8f0",
-    "blue":   "#2563eb",
-    "green":  "#059669",
-    "orange": "#d97706",
-    "red":    "#dc2626",
-    "purple": "#7c3aed",
-    "teal":   "#0891b2",
-    "amber":  "#b45309",
-    "pink":   "#db2777",
+    "bg":       "#ffffff",
+    "paper":    "#ffffff",
+    "panel":    "#f8fafc",   # カード/パネル背景
+    "text":     "#0f172a",
+    "text_sub": "#475569",   # text_sub エイリアス
+    "sub":      "#475569",
+    "text_muted": "#94a3b8",
+    "grid":     "#f1f5f9",   # 極薄グリッド
+    "border":   "#e2e8f0",
+    "border_strong": "#cbd5e1",
+    "blue":     "#2563eb",
+    "green":    "#059669",
+    "orange":   "#d97706",
+    "red":      "#dc2626",
+    "purple":   "#7c3aed",
+    "teal":     "#0891b2",
+    "amber":    "#b45309",
+    "pink":     "#db2777",
 }
 
 _FONT = "Inter, 'Noto Sans JP', -apple-system, 'Hiragino Sans', sans-serif"

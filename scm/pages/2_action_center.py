@@ -91,20 +91,24 @@ opt["days_late"] = pd.to_numeric(opt["days_late"], errors="coerce").fillna(0).as
 opt["requested_qty"] = pd.to_numeric(opt["requested_qty"], errors="coerce").fillna(0).astype(int)
 opt["requested_date"] = pd.to_datetime(opt["requested_date"], errors="coerce").dt.date
 
-# 需要ごと: 全ルート合計の確保可能数 / 最良ルート / 充足判定
+# 需要ごと: 3ルート (NEW_ORDER除外) の確保可能数 / 最良ルート / 充足判定
+# NEW_ORDER は「発注すれば原理上いくらでも確保できる」ため、不足数計算から除外
+opt_3routes = opt[opt["route_type"] != "NEW_ORDER"] if "route_type" in opt.columns else opt
+
 agg_dict = {
-    "requested_qty":       ("requested_qty",  "first"),
-    "requested_date":      ("requested_date", "first"),
-    "component_id":        ("component_id",   "first"),
-    "total_avail_4routes": ("available_qty",  "sum"),
+    "requested_qty":        ("requested_qty",  "first"),
+    "requested_date":       ("requested_date", "first"),
+    "component_id":         ("component_id",   "first"),
+    "total_avail_3routes":  ("available_qty",  "sum"),    # 3ルート合計
 }
 if "action_level" in opt.columns:
     agg_dict["action_level"] = ("action_level", "first")
 if "needs_action" in opt.columns:
     agg_dict["needs_action"] = ("needs_action", "first")
 
-agg = opt.groupby("demand_id", as_index=False).agg(**agg_dict)
-agg["total_shortage_4routes"] = (agg["requested_qty"] - agg["total_avail_4routes"]).clip(lower=0)
+agg = opt_3routes.groupby("demand_id", as_index=False).agg(**agg_dict)
+# 不足数 = 3ルートで賄えない分 (NEW_ORDER を使わずに調達できない数量)
+agg["shortage_3routes"] = (agg["requested_qty"] - agg["total_avail_3routes"]).clip(lower=0)
 
 # 部材名・カテゴリを結合
 if not components.empty:
@@ -213,7 +217,7 @@ else:
     df["_lv"] = df["action_level"].map(level_order).fillna(9) if "action_level" in df.columns else 9
     df = df.sort_values(["_lv", "希望納期まで(日)"]).drop(columns="_lv")
 
-    # 業務観点の列順 (部材カテゴリは廃止)
+    # 業務観点の列順
     show_cols = [
         "demand_id",
         "part_number",
@@ -222,14 +226,14 @@ else:
         "requested_date",
         "希望納期まで(日)",
         "requested_qty",
-        "total_avail_4routes",
-        "total_shortage_4routes",
+        "total_avail_3routes",
+        "shortage_3routes",
         "対応レベル",
     ]
     cols_present = [c for c in show_cols if c in df.columns]
     df_show = rename_columns(
         df[cols_present],
-        extra={"total_avail_4routes": "4ルート合計確保可能数", "total_shortage_4routes": "不足数"},
+        extra={"total_avail_3routes": "3ルート確保可能数", "shortage_3routes": "不足数(3ルート)"},
     )
     st.dataframe(df_show, hide_index=True, use_container_width=True, height=380)
 
@@ -303,51 +307,56 @@ else:
 
         if action_opts:
             for i, opt_a in enumerate(action_opts[:5], start=1):
-                feas_color = {
-                    "確実": "#059669", "見込み": "#d97706", "要相談": "#dc2626"
-                }.get(opt_a.feasibility, "#475569")
-                badge_cls = {
-                    "確実": "priority-ok", "見込み": "priority-medium", "要相談": "priority-critical"
-                }.get(opt_a.feasibility, "priority-medium")
+                feas_color = {"確実": "#059669", "見込み": "#d97706", "要相談": "#dc2626"}.get(opt_a.feasibility, "#475569")
+                feas_bg    = {"確実": "#f0fdf4", "見込み": "#fffbeb", "要相談": "#fef2f2"}.get(opt_a.feasibility, "#f8fafc")
+                feas_border= {"確実": "#bbf7d0", "見込み": "#fde68a", "要相談": "#fecaca"}.get(opt_a.feasibility, "#e2e8f0")
+
                 steps_html = "".join(
-                    f'<li style="display:flex;gap:8px;align-items:flex-start;margin-bottom:5px;">'
-                    f'<span style="min-width:18px;height:18px;background:#f1f5f9;border-radius:50%;'
-                    f'display:flex;align-items:center;justify-content:center;font-size:10px;'
-                    f'font-weight:700;color:#475569;flex-shrink:0;margin-top:2px;">{j}</span>'
-                    f'<span style="font-size:13px;color:#475569;line-height:1.5;">{s}</span></li>'
+                    f'<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;">'
+                    f'<span style="min-width:20px;height:20px;background:#f1f5f9;border-radius:50%;'
+                    f'display:inline-flex;align-items:center;justify-content:center;font-size:10px;'
+                    f'font-weight:700;color:#475569;flex-shrink:0;margin-top:1px;">{j}</span>'
+                    f'<span style="font-size:13px;color:#475569;line-height:1.5;">{s}</span></div>'
                     for j, s in enumerate(opt_a.steps, 1)
                 )
-                gap_html = (
-                    f'<div style="flex-direction:column;gap:2px;">'
-                    f'<div style="font-size:10px;font-weight:500;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">未充足</div>'
-                    f'<div style="font-size:18px;font-weight:700;color:#dc2626;letter-spacing:-0.02em;">{opt_a.gap_qty:,}個</div>'
+                gap_block = (
+                    f'<div style="display:flex;flex-direction:column;gap:2px;">'
+                    f'<div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">未充足</div>'
+                    f'<div style="font-size:20px;font-weight:700;color:#dc2626;letter-spacing:-0.02em;">{opt_a.gap_qty:,}個</div>'
                     f'</div>'
                 ) if opt_a.gap_qty > 0 else ""
 
-                st.markdown(
-                    f"""
-                    <div class="action-card">
-                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
-                            <span style="font-size:11px;font-weight:700;color:#94a3b8;">案{i}</span>
-                            <span style="font-size:15px;font-weight:600;color:#0f172a;flex:1;">{opt_a.title}</span>
-                            <span class="{badge_cls}">{opt_a.feasibility}</span>
-                        </div>
-                        <div style="display:flex;gap:24px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #e2e8f0;">
-                            <div style="display:flex;flex-direction:column;gap:2px;">
-                                <div style="font-size:10px;font-weight:500;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">充足数量</div>
-                                <div style="font-size:18px;font-weight:700;color:#059669;letter-spacing:-0.02em;">{opt_a.coverage_qty:,}個</div>
-                            </div>
-                            {gap_html}
-                            <div style="display:flex;flex-direction:column;gap:2px;">
-                                <div style="font-size:10px;font-weight:500;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">完了予定日</div>
-                                <div style="font-size:18px;font-weight:700;color:#0f172a;letter-spacing:-0.02em;">{opt_a.eta_date.isoformat()}</div>
-                            </div>
-                        </div>
-                        <ul style="list-style:none;padding:0;margin:0;">{steps_html}</ul>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
+                card_html = (
+                    f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;'
+                    f'padding:18px 20px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">'
+
+                    # ヘッダー: 案番号 / タイトル / 確実度バッジ
+                    f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">'
+                    f'<span style="font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:0.5px;">案{i}</span>'
+                    f'<span style="font-size:15px;font-weight:600;color:#0f172a;flex:1;">{opt_a.title}</span>'
+                    f'<span style="display:inline-flex;align-items:center;gap:4px;background:{feas_bg};'
+                    f'color:{feas_color};border:1px solid {feas_border};border-radius:6px;'
+                    f'padding:3px 10px;font-size:12px;font-weight:600;">{opt_a.feasibility}</span>'
+                    f'</div>'
+
+                    # メタ情報: 充足数量 / 未充足 / 完了日
+                    f'<div style="display:flex;gap:28px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #f1f5f9;">'
+                    f'<div style="display:flex;flex-direction:column;gap:2px;">'
+                    f'<div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">充足数量</div>'
+                    f'<div style="font-size:20px;font-weight:700;color:#059669;letter-spacing:-0.02em;">{opt_a.coverage_qty:,}個</div>'
+                    f'</div>'
+                    f'{gap_block}'
+                    f'<div style="display:flex;flex-direction:column;gap:2px;">'
+                    f'<div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">完了予定日</div>'
+                    f'<div style="font-size:20px;font-weight:700;color:#0f172a;letter-spacing:-0.02em;">{opt_a.eta_date.isoformat()}</div>'
+                    f'</div>'
+                    f'</div>'
+
+                    # 手順
+                    f'<div style="display:flex;flex-direction:column;">{steps_html}</div>'
+                    f'</div>'
                 )
+                st.markdown(card_html, unsafe_allow_html=True)
 
         # 補助情報
         st.caption(

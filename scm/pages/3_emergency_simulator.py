@@ -211,14 +211,46 @@ if submit:
     )
 
     for i, opt_a in enumerate(action_opts[:6], start=1):
-        st.markdown(
-            f"**{opt_a.title}** ｜ 確実度: `{opt_a.feasibility}` ｜ 充足: {opt_a.coverage_qty:,}個"
-            + (f" / 未充足: {opt_a.gap_qty:,}個" if opt_a.gap_qty else "")
-            + f" ｜ 完了日: **{opt_a.eta_date.isoformat()}**"
+        feas_color  = {"確実": "#059669", "見込み": "#d97706", "要相談": "#dc2626"}.get(opt_a.feasibility, "#475569")
+        feas_bg     = {"確実": "#f0fdf4", "見込み": "#fffbeb", "要相談": "#fef2f2"}.get(opt_a.feasibility, "#f8fafc")
+        feas_border = {"確実": "#bbf7d0", "見込み": "#fde68a", "要相談": "#fecaca"}.get(opt_a.feasibility, "#e2e8f0")
+        steps_html = "".join(
+            f'<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;">'
+            f'<span style="min-width:20px;height:20px;background:#f1f5f9;border-radius:50%;'
+            f'display:inline-flex;align-items:center;justify-content:center;font-size:10px;'
+            f'font-weight:700;color:#475569;flex-shrink:0;margin-top:1px;">{j}</span>'
+            f'<span style="font-size:13px;color:#475569;line-height:1.5;">{s}</span></div>'
+            for j, s in enumerate(opt_a.steps, 1)
         )
-        for step in opt_a.steps:
-            st.markdown(f"&emsp;• {step}", unsafe_allow_html=True)
-        st.markdown("")
+        gap_block = (
+            f'<div style="display:flex;flex-direction:column;gap:2px;">'
+            f'<div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">未充足</div>'
+            f'<div style="font-size:20px;font-weight:700;color:#dc2626;letter-spacing:-0.02em;">{opt_a.gap_qty:,}個</div>'
+            f'</div>'
+        ) if opt_a.gap_qty > 0 else ""
+        card_html = (
+            f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;'
+            f'padding:18px 20px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">'
+            f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">'
+            f'<span style="font-size:11px;font-weight:700;color:#94a3b8;">案{i}</span>'
+            f'<span style="font-size:15px;font-weight:600;color:#0f172a;flex:1;">{opt_a.title}</span>'
+            f'<span style="background:{feas_bg};color:{feas_color};border:1px solid {feas_border};'
+            f'border-radius:6px;padding:3px 10px;font-size:12px;font-weight:600;">{opt_a.feasibility}</span>'
+            f'</div>'
+            f'<div style="display:flex;gap:28px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #f1f5f9;">'
+            f'<div style="display:flex;flex-direction:column;gap:2px;">'
+            f'<div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">充足数量</div>'
+            f'<div style="font-size:20px;font-weight:700;color:#059669;letter-spacing:-0.02em;">{opt_a.coverage_qty:,}個</div>'
+            f'</div>'
+            f'{gap_block}'
+            f'<div style="display:flex;flex-direction:column;gap:2px;">'
+            f'<div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">完了予定日</div>'
+            f'<div style="font-size:20px;font-weight:700;color:#0f172a;letter-spacing:-0.02em;">{opt_a.eta_date.isoformat()}</div>'
+            f'</div>'
+            f'</div>'
+            f'<div>{steps_html}</div></div>'
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
 
     # 影響製品 (BOMから)
     st.markdown("---")
@@ -289,16 +321,47 @@ if submit:
 
     # マクニカ相談用テキスト
     st.markdown("---")
-    with st.expander("📧 マクニカ営業への相談用テキストを生成"):
-        cs_text = f"""【調達相談】
-■ 部材: {sel_comp_row['component_name']} ({sel_comp_row['part_number']})
-■ 必要数量: {req_qty:,} 個
-■ 希望納期: {req_date.isoformat()}
-■ 現状把握:
-  - 顧客在庫(実効): {cust_qty_effective:,} 個 (現在庫 {cust_total} - 期間内予定消費 {consumption})
-  - マクニカフリー在庫: {free_qty:,} 個 (今日+{MACNICA_TRANSIT_DAYS}日)
-  - 既存発注残BL: {po_qty:,} 個 ({'要催促' if po_any_delayed else 'ETA ' + (po_eta.isoformat() if po_eta else '—')})
-  - 新規発注LT: {base_lt_weeks} 週
+    with st.expander("📧 マクニカ営業への相談用テキストを生成（コピーしてご使用ください）"):
+        from datetime import datetime as _dt
+        shortage_total = max(0, req_qty - (cust_qty_effective + free_qty + po_qty))
+        cs_text = f"""件名: 【緊急調達相談】{sel_comp_row['component_name']} ({sel_comp_row['part_number']}) — {req_date.isoformat()} 納品希望
 
-ご相談したい内容: 上記不足分の調達方針について、最適な選択肢のご提案をお願いします。"""
+マクニカ 担当営業様
+
+お世話になっております。
+下記部材の緊急調達について、ご相談させてください。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+■ 相談内容
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【部材情報】
+  品番        : {sel_comp_row['part_number']}
+  品名        : {sel_comp_row['component_name']}
+  メーカー    : {sel_comp_row.get('supplier_name', '—')}
+
+【調達要件】
+  必要数量    : {req_qty:,} 個
+  希望納期    : {req_date.isoformat()}
+  緊急度      : 高（FCST外の突発需要のため即時対応が必要）
+
+【現在の在庫・調達状況】
+  自社在庫    : {cust_total:,} 個（期間内他需要 {consumption:,} 個を差し引いた実効在庫: {cust_qty_effective:,} 個）
+  御社フリー在庫 : {free_qty:,} 個（引当済・本日より{MACNICA_TRANSIT_DAYS}日で出荷可能）
+  既存発注残BL : {po_qty:,} 個（最早ETA: {po_eta.isoformat() if po_eta else "未定"}{'、一部遅延あり' if po_any_delayed else ''}）
+  通常LT      : {base_lt_weeks} 週
+
+【不足状況の概算】
+  {'フリー在庫 + 既存BL + 自社在庫の合計で必要数を充足可能な見込みです。' if shortage_total <= 0 else f'上記3ルート合計でも約 {shortage_total:,} 個が不足しており、新規発注が必要です。'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+■ ご相談したい事項
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. フリー在庫 {free_qty:,} 個の即時引当が可能かどうか
+2. 既存発注残BL ({po_qty:,} 個) の納期前倒し・催促の可否
+{'3. 新規追加発注の受付可否および最短納期の確認（目標: ' + req_date.isoformat() + '）' if shortage_total > 0 else ''}
+
+お忙しいところ恐れ入りますが、至急ご確認・ご回答をお願い申し上げます。
+
+以上"""
         st.code(cs_text, language="text")
+        st.caption("💡 上記テキストをコピーし、社内メール・チャットツール等でマクニカ担当者へ送付してください。")

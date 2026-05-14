@@ -147,18 +147,18 @@ section[data-testid="stSidebar"] small {{
     font-weight: 600 !important;
 }}
 
-/* ── メトリクスカード ───────────────────────────────────── */
+/* ── メトリクスカード (Phase 9: 影を強化し白背景でも明確に) ── */
 [data-testid="stMetric"] {{
     background: {TOKENS["bg"]} !important;
-    border: 1px solid {TOKENS["border"]} !important;
+    border: 1.5px solid {TOKENS["border_strong"]} !important;
     border-radius: 12px !important;
     padding: 16px 20px !important;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.03) !important;
     transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }}
 [data-testid="stMetric"]:hover {{
-    box-shadow: 0 3px 8px rgba(0,0,0,0.09) !important;
-    border-color: {TOKENS["border_strong"]} !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.13) !important;
+    border-color: {TOKENS["accent"]} !important;
 }}
 [data-testid="stMetricLabel"] {{
     color: {TOKENS["text_sub"]} !important;
@@ -237,7 +237,7 @@ section[data-testid="stSidebar"] small {{
     border-bottom: 2px solid {TOKENS["accent"]} !important;
 }}
 
-/* ── 入力フィールド ─────────────────────────────────────── */
+/* ── 入力フィールド (Phase 9: border 強化で白背景でも視認) ─ */
 .stSelectbox > div > div,
 .stMultiSelect > div > div,
 .stDateInput > div > div,
@@ -246,9 +246,9 @@ section[data-testid="stSidebar"] small {{
 .stTextArea > div > div {{
     background: {TOKENS["bg"]} !important;
     color: {TOKENS["text"]} !important;
-    border: 1px solid {TOKENS["border_strong"]} !important;
+    border: 1.5px solid {TOKENS["border_strong"]} !important;
     border-radius: 8px !important;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.07) !important;
 }}
 .stSelectbox label, .stMultiSelect label, .stRadio label, .stCheckbox label,
 .stDateInput label, .stNumberInput label, .stTextInput label, .stTextArea label,
@@ -288,25 +288,25 @@ div[data-baseweb="popover"] li:hover {{
     overflow: hidden !important;
 }}
 
-/* ── Plotly チャート ─────────────────────────────────────── */
+/* ── Plotly チャート (Phase 9: 影を強化) ─────────────────── */
 .stPlotlyChart {{
     background: {TOKENS["bg"]} !important;
-    border: 1px solid {TOKENS["border"]} !important;
+    border: 1.5px solid {TOKENS["border_strong"]} !important;
     border-radius: 12px !important;
     padding: 16px 12px 8px !important;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.09) !important;
 }}
 .js-plotly-plot .plotly .bg {{
     fill: transparent !important;
 }}
 
-/* ── Expander ───────────────────────────────────────────── */
+/* ── Expander (Phase 9: 影を追加) ──────────────────────── */
 [data-testid="stExpander"] {{
     background: {TOKENS["bg"]} !important;
-    border: 1px solid {TOKENS["border"]} !important;
+    border: 1.5px solid {TOKENS["border_strong"]} !important;
     border-radius: 10px !important;
     margin-bottom: 6px !important;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
     overflow: hidden;
 }}
 [data-testid="stExpander"] summary {{

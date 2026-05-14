@@ -61,12 +61,18 @@ if commit.empty:
 
 # 型整え
 commit = commit.copy()
+commit["requested_delivery_date"] = pd.to_datetime(commit["requested_delivery_date"], errors="coerce").dt.date
+commit["deadline_date"] = pd.to_datetime(commit["deadline_date"], errors="coerce").dt.date
+
+# days_to_due: 列がなければ requested_delivery_date から計算
+if "days_to_due" not in commit.columns:
+    commit["days_to_due"] = commit["requested_delivery_date"].apply(
+        lambda d: int((d - today).days) if d is not None and not pd.isna(d) else 0
+    )
+
 for col in ("days_to_due", "remaining_qty", "current_customer_stock", "risk_score"):
     if col in commit.columns:
         commit[col] = pd.to_numeric(commit[col], errors="coerce").fillna(0).astype(int)
-
-commit["requested_delivery_date"] = pd.to_datetime(commit["requested_delivery_date"], errors="coerce").dt.date
-commit["deadline_date"] = pd.to_datetime(commit["deadline_date"], errors="coerce").dt.date
 
 # ────────────────────────────────────────────────────────
 # KPI: 優先度別件数 (Critical / High / Mid / Low)

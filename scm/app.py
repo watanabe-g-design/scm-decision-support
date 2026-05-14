@@ -109,7 +109,9 @@ st.caption(
 
 if not commit_risk.empty:
     cr = commit_risk.copy()
-    cr["days_to_due"] = pd.to_numeric(cr.get("days_to_due", 0), errors="coerce").fillna(0)
+    if "days_to_due" not in cr.columns:
+        cr["days_to_due"] = 0
+    cr["days_to_due"] = pd.to_numeric(cr["days_to_due"], errors="coerce").fillna(0)
     n_cr_crit = int((cr["priority_rank"] == "Critical").sum())
     n_cr_high = int((cr["priority_rank"] == "High").sum())
     n_cr_mid  = int((cr["priority_rank"] == "Mid").sum())
