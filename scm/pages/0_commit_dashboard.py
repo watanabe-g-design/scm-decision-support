@@ -28,7 +28,7 @@ from components.sidebar import render_sidebar
 from components.today_banner import render_today_banner
 from services.config import get_as_of_date
 from services.plot_theme import base_layout, get_theme_tokens
-from services.database import get_order_commit_risk
+from services.database import get_order_commit_risk, get_procurement_options, get_silver_components
 
 st.set_page_config(page_title="納期コミット | SCM調達支援", layout="wide")
 inject_css()
@@ -41,15 +41,18 @@ t = get_theme_tokens()
 # データロード
 # ────────────────────────────────────────────────────────
 with st.spinner("データを読み込んでいます..."):
-    commit = get_order_commit_risk()
+    commit  = get_order_commit_risk()
+    options = get_procurement_options()
+    comps   = get_silver_components()
 
 today = get_as_of_date()
 
-st.markdown("## 📌 納期コミットダッシュボード")
+st.markdown("## 📌 製品 納期コミットダッシュボード（受注ベース）")
 st.caption(
-    "顧客から受注した案件の納期コミット状況を一覧。"
+    "顧客から受注した**製品**の納期コミット状況を一覧表示します。"
     "**残日数の少ない順** に並べ、**今すぐ動くべき案件 (Critical)** を最優先で対応します。"
-    "本画面は『何を、いつまでに、どう対応すべきか』を可視化することを目的としています。"
+    "各Critical案件の下部には、どの**半導体部材**がボトルネックになっているかと、"
+    "「誰に何を依頼すべきか」を自動生成します。"
 )
 
 if commit.empty:
@@ -227,77 +230,153 @@ else:
 
 st.markdown("---")
 
-# ────────────────────────────────────────────────────────
-# アクション一覧表 (残日数昇順 / 優先度別ハイライト)
-# ────────────────────────────────────────────────────────
-st.markdown(f"### 📋 納期コミット一覧 ({len(df):,} 件)")
-st.caption("**残日数の少ない順** に表示。Priority列の色でアクションの緊急度を判断してください。")
+# ── タブ: 一覧 / Critical詳細（ボトルネック分析）──────────
+tab_list, tab_crit = st.tabs(["📋 納期コミット一覧", "🚨 Critical 受注 ボトルネック分析"])
 
-if df.empty:
-    st.info("条件に該当する受注がありません。フィルターを調整してください。")
-else:
-    df_show = df.copy()
-    priority_order = {"Critical": 0, "High": 1, "Mid": 2, "Low": 3}
-    df_show["_p"] = df_show["priority_rank"].map(priority_order).fillna(9)
-    df_show = df_show.sort_values(["_p", "days_to_due"]).drop(columns="_p")
+# ─── Tab 1: 一覧表 ──────────────────────────────────────
+with tab_list:
+    st.caption("**残日数の少ない順** に表示。「推奨アクション」欄に従って今日の対応を決めてください。")
+    if df.empty:
+        st.info("条件に該当する受注がありません。")
+    else:
+        df_show = df.copy()
+        priority_order = {"Critical": 0, "High": 1, "Mid": 2, "Low": 3}
+        df_show["_p"] = df_show["priority_rank"].map(priority_order).fillna(9)
+        df_show = df_show.sort_values(["_p", "days_to_due"]).drop(columns="_p")
+        priority_display = {"Critical": "🔴 Critical", "High": "🟠 High", "Mid": "🟡 Mid", "Low": "🟢 Low"}
+        df_show["Priority"] = df_show["priority_rank"].map(priority_display).fillna(df_show["priority_rank"])
+        show_cols = [
+            ("sales_order_id",         "受注ID"),
+            ("customer_name",          "顧客名"),
+            ("product_name",           "製品名"),
+            ("part_number",            "部材品番"),
+            ("requested_delivery_date","希望納期"),
+            ("days_to_due",            "残日数"),
+            ("remaining_qty",          "残数量"),
+            ("Priority",               "Priority"),
+            ("adjustment_action",      "推奨アクション"),
+            ("risk_reason",            "リスク理由"),
+            ("current_customer_stock", "顧客現在庫"),
+        ]
+        cols_present = [(k, v) for k, v in show_cols if k in df_show.columns]
+        table = df_show[[k for k, _ in cols_present]].rename(columns=dict(cols_present))
+        st.dataframe(table, hide_index=True, use_container_width=True, height=420)
 
-    # 優先度を色付き表記に
-    priority_display = {
-        "Critical": "🔴 Critical",
-        "High":     "🟠 High",
-        "Mid":      "🟡 Mid",
-        "Low":      "🟢 Low",
-    }
-    df_show["Priority"] = df_show["priority_rank"].map(priority_display).fillna(df_show["priority_rank"])
+# ─── Tab 2: Critical ボトルネック分析 ──────────────────
+with tab_crit:
+    st.caption(
+        "Critical受注ごとに「どの**半導体部材**が不足しているか」と"
+        "「**誰に何を依頼すべきか**」を自動分析します。"
+    )
+    crit = df[df["priority_rank"] == "Critical"].copy()
+    if crit.empty:
+        st.success("✅ Critical (残3日以内) の受注はありません。今日緊急対応すべき案件なし。")
+    else:
+        crit = crit.sort_values("days_to_due").head(10)
 
-    show_cols = [
-        ("sales_order_id",         "受注ID"),
-        ("customer_name",          "顧客名"),
-        ("product_name",           "製品名"),
-        ("part_number",            "部材品番"),
-        ("requested_delivery_date","希望納期"),
-        ("days_to_due",            "残日数"),
-        ("remaining_qty",          "残数量"),
-        ("Priority",               "Priority"),
-        ("adjustment_action",      "推奨アクション"),
-        ("risk_reason",            "リスク理由"),
-        ("current_customer_stock", "顧客現在庫"),
-    ]
-    cols_present = [(k, v) for k, v in show_cols if k in df_show.columns]
-    table = df_show[[k for k, _ in cols_present]].rename(columns=dict(cols_present))
-    st.dataframe(table, hide_index=True, use_container_width=True, height=460)
+        # procurement_options から部材ごとのベストルートを取得
+        best_route = pd.DataFrame()
+        if not options.empty:
+            opt = options.copy()
+            opt["shortage_qty"] = pd.to_numeric(opt.get("shortage_qty", 0), errors="coerce").fillna(0)
+            opt["available_qty"] = pd.to_numeric(opt.get("available_qty", 0), errors="coerce").fillna(0)
+            # 各 component_id のベストルート (shortage_qty 最小を選択)
+            best_route = (
+                opt.sort_values("shortage_qty")
+                .groupby("component_id")
+                .first()
+                .reset_index()[["component_id", "route_type", "available_qty", "shortage_qty", "action_level"]]
+            )
 
-# ────────────────────────────────────────────────────────
-# Critical受注の詳細セクション (個別カード表示)
-# ────────────────────────────────────────────────────────
-st.markdown("---")
-st.markdown("### 🚨 Critical 受注の詳細 (今すぐ対応すべき案件)")
+        for _, row in crit.iterrows():
+            days = int(row.get("days_to_due", 0))
+            comp_id = row.get("component_id", "")
+            days_label = (f"納期超過 {abs(days)}日" if days < 0 else f"残 {days} 日")
+            days_color = t["red"]
 
-crit = df[df["priority_rank"] == "Critical"].copy()
-if crit.empty:
-    st.success("✅ Critical (残3日以内) の受注はありません。今日緊急対応すべき案件なし。")
-else:
-    crit = crit.sort_values("days_to_due").head(10)
-    for _, row in crit.iterrows():
-        days = int(row.get("days_to_due", 0))
-        days_text = (f"<span style='color:{t['red']};font-weight:700;'>納期超過 {abs(days)}日</span>"
-                     if days < 0 else
-                     f"<span style='color:{t['red']};font-weight:700;'>残 {days} 日</span>")
-        st.markdown(
-            f"""
-            <div class="lt-alert-card">
-                <div class="lt-alert-card-title">
-                    🔴 {row.get('sales_order_id', '—')} ｜ {row.get('customer_name', '—')} → {row.get('product_name', '—')}
-                </div>
-                <div class="lt-alert-card-body">
-                    {days_text}　｜　希望納期 <b>{row.get('requested_delivery_date', '—')}</b>　｜　残数量 <b>{int(row.get('remaining_qty', 0)):,}個</b><br>
-                    <b>📝 推奨アクション</b>: {row.get('adjustment_action', '—')}　｜　<b>⚠️ リスク</b>: {row.get('risk_reason', '—')}<br>
-                    部材: {row.get('part_number', '—')} ({row.get('component_name', '—')})　｜　顧客現在庫: {int(row.get('current_customer_stock', 0)):,}個
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            # この受注の部材についてのボトルネック情報
+            route_info = best_route[best_route["component_id"] == comp_id].iloc[0] if (
+                not best_route.empty and comp_id in best_route["component_id"].values
+            ) else None
+
+            # 推奨アクション文を生成
+            if route_info is not None:
+                al = str(route_info.get("action_level", ""))
+                avail = int(route_info.get("available_qty", 0))
+                short = int(row.get("component_required_qty", 0)) - avail
+                route = str(route_info.get("route_type", ""))
+
+                if al == "不要" or short <= 0:
+                    action_who = "（対応不要）"
+                    action_what = "顧客在庫で充足可能です。"
+                    action_color = "#059669"
+                elif al in ("軽", "中"):
+                    action_who = "📞 マクニカ 営業担当へ連絡"
+                    if route == "MACNICA_FREE":
+                        action_what = f"フリー在庫 {avail:,}個 の引当依頼（今日中）"
+                    else:
+                        action_what = "既存発注残BL の納期前倒し・催促依頼（今週中）"
+                    action_color = t["orange"]
+                else:
+                    action_who = "📩 マクニカ 調達部へ緊急発注依頼"
+                    action_what = f"新規追加発注が必要。不足見込み {max(short, 0):,}個。LT確認後に即時手配。"
+                    action_color = t["red"]
+            else:
+                action_who = str(row.get("adjustment_action", "—"))
+                action_what = str(row.get("risk_reason", "—"))
+                action_color = t["orange"]
+
+            # ボトルネック部材の在庫状況
+            cust_stock = int(row.get("current_customer_stock", 0))
+            required = int(row.get("component_required_qty", 0))
+            stock_status = "充足" if cust_stock >= required else f"不足 {max(0, required - cust_stock):,}個"
+            stock_color = "#059669" if cust_stock >= required else t["red"]
+
+            # カード HTML
+            card = (
+                f'<div style="background:#ffffff;border:1.5px solid {t["border_strong"]};'
+                f'border-left:5px solid {action_color};border-radius:12px;'
+                f'padding:18px 20px;margin-bottom:14px;box-shadow:0 2px 6px rgba(0,0,0,0.07);">'
+
+                # ヘッダー
+                f'<div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:14px;">'
+                f'<div style="flex:1;">'
+                f'<div style="font-size:15px;font-weight:700;color:{t["text"]};margin-bottom:4px;">'
+                f'🔴 {row.get("sales_order_id","—")} ｜ {row.get("customer_name","—")} → {row.get("product_name","—")}'
+                f'</div>'
+                f'<div style="font-size:13px;color:{t["sub"]};">'
+                f'希望納期: <b>{row.get("requested_delivery_date","—")}</b>　'
+                f'<span style="color:{days_color};font-weight:700;">{days_label}</span>　'
+                f'残数量: {int(row.get("remaining_qty", 0)):,}個'
+                f'</div>'
+                f'</div></div>'
+
+                # 2カラム: 不足状況 | 推奨アクション
+                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">'
+
+                # 左: ボトルネック部材
+                f'<div style="background:#f8fafc;border-radius:8px;padding:14px;">'
+                f'<div style="font-size:10px;font-weight:600;color:{t["sub"]};text-transform:uppercase;'
+                f'letter-spacing:0.6px;margin-bottom:8px;">🔍 半導体部材の状況</div>'
+                f'<div style="font-size:13px;color:{t["text"]};line-height:1.6;">'
+                f'品番: <b>{row.get("part_number","—")}</b><br>'
+                f'部材名: {row.get("component_name","—")}<br>'
+                f'必要数: {required:,}個 ｜ 顧客現在庫: {cust_stock:,}個<br>'
+                f'<span style="color:{stock_color};font-weight:700;">→ {stock_status}</span>'
+                f'</div></div>'
+
+                # 右: 推奨アクション
+                f'<div style="background:#fffbeb;border-radius:8px;padding:14px;">'
+                f'<div style="font-size:10px;font-weight:600;color:{t["sub"]};text-transform:uppercase;'
+                f'letter-spacing:0.6px;margin-bottom:8px;">📝 推奨アクション</div>'
+                f'<div style="font-size:13px;color:{t["text"]};line-height:1.6;">'
+                f'<span style="font-weight:700;color:{action_color};">{action_who}</span><br>'
+                f'{action_what}'
+                f'</div></div>'
+
+                f'</div></div>'
+            )
+            st.markdown(card, unsafe_allow_html=True)
 
 # ────────────────────────────────────────────────────────
 # 使い方ガイド

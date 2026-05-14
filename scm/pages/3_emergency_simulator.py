@@ -93,12 +93,28 @@ with st.form("emergency_form"):
         help="ドロップダウン内の検索ボックスに品番や部材名を入力して絞り込めます",
     )
 
-    fc3, fc4 = st.columns(2)
+    st.markdown("---")
+    st.markdown("**📦 調達条件の入力**")
+    fc3, fc4 = st.columns([2, 2])
     with fc3:
-        req_qty = st.number_input(
-            "📦 必要数量（突発的に必要となった部材数）",
-            min_value=1, max_value=100000, value=150, step=10,
+        # P5: 必要数量 UIを見やすく改善
+        st.markdown(
+            "<div style='font-size:13px;font-weight:500;color:#0f172a;margin-bottom:6px;'>📦 必要数量（個）</div>",
+            unsafe_allow_html=True,
         )
+        qty_col, unit_col = st.columns([4, 1])
+        with qty_col:
+            req_qty = st.number_input(
+                "必要数量",
+                min_value=1, max_value=100000, value=150, step=10,
+                label_visibility="collapsed",
+                help="突発的に必要となった部材の数量を入力してください。",
+            )
+        with unit_col:
+            st.markdown(
+                "<div style='padding-top:10px;font-size:14px;color:#475569;font-weight:500;'>個</div>",
+                unsafe_allow_html=True,
+            )
     with fc4:
         req_date = st.date_input(
             "⏰ 希望納期（この日までに入手したい）",

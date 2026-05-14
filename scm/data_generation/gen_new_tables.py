@@ -702,6 +702,79 @@ def extend_forecasts_to_2026_12(fc_df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ════════════════════════════════════════════════════════════════
+# sales_orders 再生成 (Phase 10: 消費を9ヶ月に均等分散)
+# ════════════════════════════════════════════════════════════════
+def gen_sales_orders_distributed(
+    products_df: pd.DataFrame,
+    bom_df: pd.DataFrame,
+    customers_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    受注残を9ヶ月 (4月〜12月 2026) に均等分散して再生成する。
+
+    従来は TODAY+0〜60日 に集中していたため、在庫健全性スコアが急落していた。
+    Phase 10: TODAY+4〜270日 に均等分散し、月次消費スパイクを解消する。
+    """
+    statuses = ["confirmed", "confirmed", "confirmed", "picking", "picking",
+                "shipped_partial", "backorder", "backorder"]
+    rows = []
+    oid = 1
+
+    for _ in range(120):
+        # CUS001の製品を中心に選択
+        prod_sample = products_df.sample(n=1, random_state=None).iloc[0]
+        cust_rows = customers_df[customers_df["customer_id"] == prod_sample["customer_id"]]
+        if cust_rows.empty:
+            continue
+        cust = cust_rows.iloc[0]
+
+        order_date     = TODAY - timedelta(days=rng.randint(1, 30))
+        # 4〜270日後に均等分散
+        requested_date = TODAY + timedelta(days=rng.randint(4, 270))
+        qty = rng.randint(5, 150) * 5
+
+        status     = rng.choice(statuses)
+        shipped_qty = 0
+        if status == "shipped_partial":
+            shipped_qty = int(qty * rng.uniform(0.3, 0.7))
+
+        response_date = order_date + timedelta(days=rng.randint(1, 3))
+        earliest_ship = requested_date - timedelta(days=rng.randint(5, 14))
+        deadline_date = requested_date + timedelta(days=rng.randint(2, 7))
+        partial_qty   = int(qty * rng.uniform(0.3, 0.7)) if status == "shipped_partial" else 0
+
+        bom_for_prod = bom_df[bom_df["product_id"] == prod_sample["product_id"]]
+        for _, b in bom_for_prod.iterrows():
+            comp_qty = (qty - shipped_qty) * b["quantity_per_unit"]
+            rows.append({
+                "sales_order_id":          f"SO{oid:06d}",
+                "customer_id":             cust["customer_id"],
+                "customer_name":           cust["customer_name"],
+                "product_id":              prod_sample["product_id"],
+                "product_name":            prod_sample["product_name"],
+                "component_id":            b["component_id"],
+                "order_date":              order_date.isoformat(),
+                "requested_delivery_date": requested_date.isoformat(),
+                "response_date":           response_date.isoformat(),
+                "earliest_ship_date":      earliest_ship.isoformat(),
+                "deadline_date":           deadline_date.isoformat(),
+                "order_qty":               qty,
+                "shipped_qty":             shipped_qty,
+                "remaining_qty":           qty - shipped_qty,
+                "component_required_qty":  int(comp_qty),
+                "partial_available_qty":   partial_qty,
+                "status":                  status,
+                "priority_flag":           requested_date <= TODAY + timedelta(days=7),
+            })
+        oid += 1
+
+    df = pd.DataFrame(rows)
+    print(f"  → sales_orders: {len(df)} 行 ({df['sales_order_id'].nunique()} 受注)")
+    print(f"     requested_delivery_date: {df['requested_delivery_date'].min()} ~ {df['requested_delivery_date'].max()}")
+    return df
+
+
+# ════════════════════════════════════════════════════════════════
 # 倉庫マスタにマクニカ新子安追加
 # ════════════════════════════════════════════════════════════════
 def add_macnica_warehouse(warehouses_df: pd.DataFrame) -> pd.DataFrame:
@@ -725,20 +798,25 @@ def add_macnica_warehouse(warehouses_df: pd.DataFrame) -> pd.DataFrame:
 # メイン
 # ════════════════════════════════════════════════════════════════
 def main():
-    print(f"[Phase 8 データ再生成] 基準日={TODAY.isoformat()}, 顧客={TARGET_CUSTOMER_ID}")
+    print(f"[Phase 10 データ再生成] 基準日={TODAY.isoformat()}, 顧客={TARGET_CUSTOMER_ID}")
 
     components_df = pd.read_csv(OUT / "components.csv",         encoding="utf-8-sig")
     warehouses_df = pd.read_csv(OUT / "warehouses.csv",         encoding="utf-8-sig")
     forecasts_df  = pd.read_csv(OUT / "forecasts.csv",          encoding="utf-8-sig")
     bom_df        = pd.read_csv(OUT / "bom.csv",                encoding="utf-8-sig")
     products_df   = pd.read_csv(OUT / "products.csv",           encoding="utf-8-sig")
+    customers_df  = pd.read_csv(OUT / "customers.csv",          encoding="utf-8-sig")
     inventory_df  = pd.read_csv(OUT / "inventory_current.csv",  encoding="utf-8-sig")
 
     inventory_df["stock_qty"] = pd.to_numeric(inventory_df["stock_qty"], errors="coerce").fillna(0)
 
-    # ⓪ forecasts 延長
+    # ⓪a forecasts 延長
     forecasts_df = extend_forecasts_to_2026_12(forecasts_df)
     forecasts_df.to_csv(OUT / "forecasts.csv", index=False, encoding="utf-8-sig")
+
+    # ⓪b sales_orders 再生成 (Phase 10: 消費を9ヶ月に均等分散)
+    sales_df = gen_sales_orders_distributed(products_df, bom_df, customers_df)
+    sales_df.to_csv(OUT / "sales_orders.csv", index=False, encoding="utf-8-sig")
 
     # ① 倉庫マスタ
     warehouses_df = add_macnica_warehouse(warehouses_df)
@@ -788,7 +866,8 @@ def main():
 
     print("\n[完了] 出力ファイル:")
     for f in ["warehouses.csv", "purchase_orders.csv", "inventory_current.csv",
-              "macnica_free_inventory.csv", "demand_plan_components.csv", "forecasts.csv"]:
+              "macnica_free_inventory.csv", "demand_plan_components.csv", "forecasts.csv",
+              "sales_orders.csv"]:
         print(f"  - {OUT / f}")
 
 

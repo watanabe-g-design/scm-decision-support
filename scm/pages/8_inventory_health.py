@@ -40,6 +40,7 @@ from services.database import (
     get_inventory_breach,
     get_silver_inventory_current,
     get_silver_components,
+    get_requirement_timeline,
 )
 
 st.set_page_config(page_title="顧客在庫健全性 | SCM調達支援", layout="wide")
@@ -53,10 +54,11 @@ t = get_theme_tokens()
 # データロード
 # ────────────────────────────────────────────────────────
 with st.spinner("データを読み込んでいます..."):
-    proj   = get_balance_projection()
-    breach = get_inventory_breach()
-    cur    = get_silver_inventory_current()
-    comps  = get_silver_components()
+    proj     = get_balance_projection()
+    breach   = get_inventory_breach()
+    cur      = get_silver_inventory_current()
+    comps    = get_silver_components()
+    timeline = get_requirement_timeline()  # トランザクション詳細
 
 today = get_as_of_date()
 
@@ -265,75 +267,100 @@ for iid in ordered_ids:
     # ドリルダウンで来た部材は最初から展開
     is_expanded = (drill_comp_id == iid)
     with st.expander(expander_label, expanded=is_expanded):
-        # ── 月次表 ──
-        sub_show = sub.copy()
-        sub_show["状態"] = sub_show["policy_status"].map(status_icon_map).fillna(sub_show["policy_status"]) + " " + sub_show["policy_status"]
-        table_cols = [
-            ("month_end_date",            "月"),
-            ("customer_stock_proj",       "予測在庫"),
-            ("confirmed_order_qty",       "確定受注"),
-            ("forecast_qty",              "フォーキャスト"),
-            ("inbound_qty_order_linked",  "入荷予定"),
-            ("production_use_qty",        "消費量"),
-            ("min_qty",                   "min（安全在庫）"),
-            ("max_qty",                   "max（上限）"),
-            ("状態",                       "ステータス"),
-        ]
-        cols_present = [(k, v) for k, v in table_cols if k in sub_show.columns]
-        table = sub_show[[k for k, _ in cols_present]].rename(columns=dict(cols_present))
-        st.dataframe(table, hide_index=True, use_container_width=True, height=min(320, 60 + 36*len(table)))
+        # P7-2: 月次予測 と トランザクション詳細 の2タブ
+        inv_tab1, inv_tab2 = st.tabs(["📊 月次予測", "📋 トランザクション詳細（消費・入荷イベント）"])
 
-        # ── グラフ (予測在庫 + min/max + 状態マーカー) ──
-        sub["month_dt"] = pd.to_datetime(sub["month_end_date"] + "-01", errors="coerce")
-        # min/max は最後の値で代表
-        min_v = int(sub["min_qty"].iloc[-1]) if "min_qty" in sub.columns else 0
-        max_v = int(sub["max_qty"].iloc[-1]) if "max_qty" in sub.columns else 0
+        with inv_tab1:
+            # ── 月次表 ──
+            sub_show = sub.copy()
+            sub_show["状態"] = sub_show["policy_status"].map(status_icon_map).fillna(sub_show["policy_status"]) + " " + sub_show["policy_status"]
+            table_cols = [
+                ("month_end_date",            "月"),
+                ("customer_stock_proj",       "予測在庫"),
+                ("confirmed_order_qty",       "確定受注消費"),
+                ("forecast_qty",              "フォーキャスト消費"),
+                ("inbound_qty_order_linked",  "入荷予定"),
+                ("production_use_qty",        "消費量（確定 or FCST大きい方）"),
+                ("min_qty",                   "min（安全在庫）"),
+                ("max_qty",                   "max（上限）"),
+                ("状態",                       "ステータス"),
+            ]
+            cols_present = [(k, v) for k, v in table_cols if k in sub_show.columns]
+            table = sub_show[[k for k, _ in cols_present]].rename(columns=dict(cols_present))
+            st.dataframe(table, hide_index=True, use_container_width=True, height=min(280, 60 + 36*len(table)))
 
-        fig = go.Figure()
-        # 予測在庫ライン
-        fig.add_trace(go.Scatter(
-            x=sub["month_dt"], y=sub["customer_stock_proj"],
-            mode="lines+markers",
-            name="予測在庫",
-            line=dict(color=t["text"], width=2.5),
-            marker=dict(size=8, color=t["text"]),
-            hovertemplate="%{x|%Y-%m}<br>予測在庫: %{y:,}個<extra></extra>",
-        ))
-        # 安全在庫 (min) - dashed
-        fig.add_trace(go.Scatter(
-            x=sub["month_dt"], y=[min_v] * len(sub),
-            mode="lines",
-            name=f"安全在庫 (min={min_v:,})",
-            line=dict(color=t["orange"], width=1.5, dash="dash"),
-            hovertemplate=f"安全在庫: {min_v:,}個<extra></extra>",
-        ))
-        # 上限 (max) - dashed
-        fig.add_trace(go.Scatter(
-            x=sub["month_dt"], y=[max_v] * len(sub),
-            mode="lines",
-            name=f"最大基準 (max={max_v:,})",
-            line=dict(color=t["blue"], width=1.5, dash="dash"),
-            hovertemplate=f"最大基準: {max_v:,}個<extra></extra>",
-        ))
+        with inv_tab2:
+            # ── トランザクション詳細 ──
+            st.caption(
+                "部材ごとのイベント別在庫推移。"
+                "**顧客在庫**=基準スナップショット / **生産使用日**=受注消費（マイナス） / **商社納入日**=PO入荷（プラス）"
+            )
+            if not timeline.empty and iid in timeline.get("item_id", pd.Series(dtype=str)).values:
+                tl = timeline[timeline["item_id"] == iid].copy()
+                tl["event_date"] = pd.to_datetime(tl["event_date"], errors="coerce").dt.date
+                tl = tl.sort_values("event_date")
+                tl["quantity"] = pd.to_numeric(tl["quantity"], errors="coerce").fillna(0).astype(int)
+                tl["cumulative_balance"] = pd.to_numeric(tl["cumulative_balance"], errors="coerce").fillna(0).astype(int)
 
-        # 状態の悪い月にマーカー追加
-        for status, color, symbol in [("ZERO", t["red"], "x"),
-                                       ("UNDER", t["orange"], "x"),
-                                       ("OVER", "#d4a000", "diamond")]:
-            bad = sub[sub["policy_status"] == status]
-            if not bad.empty:
-                fig.add_trace(go.Scatter(
-                    x=bad["month_dt"], y=bad["customer_stock_proj"],
-                    mode="markers",
-                    name=status,
-                    marker=dict(color=color, size=14, symbol=symbol, line=dict(width=2, color=color)),
-                    hovertemplate="%{x|%Y-%m}<br>" + status + "<extra></extra>",
-                ))
+                event_icon = {"顧客在庫": "📦", "生産使用日": "🔽", "商社納入日": "🔼"}
+                tl["イベント"] = tl["event_type"].apply(lambda x: f"{event_icon.get(x,'•')} {x}")
+                tl_cols = [
+                    ("event_date",         "日付"),
+                    ("イベント",            "イベント種類"),
+                    ("order_no",           "受注/発注No"),
+                    ("quantity",           "数量変動"),
+                    ("cumulative_balance", "累積在庫残"),
+                ]
+                cols_p = [(k, v) for k, v in tl_cols if k in tl.columns]
+                st.dataframe(
+                    tl[[k for k, _ in cols_p]].rename(columns=dict(cols_p)),
+                    hide_index=True, use_container_width=True,
+                    height=min(380, 60 + 36*len(tl)),
+                )
+            else:
+                st.info("gold_requirement_timeline の対象部材データが見つかりません。Lakeflow パイプラインを実行してください。")
 
-        fig.update_layout(**base_layout(height=340, x_title="月", y_title="数量（個）"))
-        fig.update_xaxes(tickformat="%Y-%m")
-        add_today_vline(fig)
-        st.plotly_chart(fig, use_container_width=True, key=f"chart_{iid}")
+        # ── グラフ (予測在庫 + min/max + 状態マーカー) ── (inv_tab1の下部に続く)
+        with inv_tab1:
+            # ── グラフ ──
+            sub["month_dt"] = pd.to_datetime(sub["month_end_date"] + "-01", errors="coerce")
+            min_v = int(sub["min_qty"].iloc[-1]) if "min_qty" in sub.columns else 0
+            max_v = int(sub["max_qty"].iloc[-1]) if "max_qty" in sub.columns else 0
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=sub["month_dt"], y=sub["customer_stock_proj"],
+                mode="lines+markers", name="予測在庫",
+                line=dict(color=t["text"], width=2.5),
+                marker=dict(size=8, color=t["text"]),
+                hovertemplate="%{x|%Y-%m}<br>予測在庫: %{y:,}個<extra></extra>",
+            ))
+            fig.add_trace(go.Scatter(
+                x=sub["month_dt"], y=[min_v] * len(sub),
+                mode="lines", name=f"安全在庫 (min={min_v:,})",
+                line=dict(color=t["orange"], width=1.5, dash="dash"),
+                hovertemplate=f"安全在庫: {min_v:,}個<extra></extra>",
+            ))
+            fig.add_trace(go.Scatter(
+                x=sub["month_dt"], y=[max_v] * len(sub),
+                mode="lines", name=f"最大基準 (max={max_v:,})",
+                line=dict(color=t["blue"], width=1.5, dash="dash"),
+                hovertemplate=f"最大基準: {max_v:,}個<extra></extra>",
+            ))
+            for status, color, symbol in [("ZERO", t["red"], "x"),
+                                           ("UNDER", t["orange"], "x"),
+                                           ("OVER", "#d4a000", "diamond")]:
+                bad = sub[sub["policy_status"] == status]
+                if not bad.empty:
+                    fig.add_trace(go.Scatter(
+                        x=bad["month_dt"], y=bad["customer_stock_proj"],
+                        mode="markers", name=status,
+                        marker=dict(color=color, size=14, symbol=symbol, line=dict(width=2, color=color)),
+                        hovertemplate="%{x|%Y-%m}<br>" + status + "<extra></extra>",
+                    ))
+            fig.update_layout(**base_layout(height=320, x_title="月", y_title="数量（個）"))
+            fig.update_xaxes(tickformat="%Y-%m")
+            add_today_vline(fig)
+            st.plotly_chart(fig, use_container_width=True, key=f"chart_{iid}")
 
 st.markdown("---")
 

@@ -194,7 +194,7 @@ def gen_sales_orders(prods, comps, bom, cus):
     """
     受注残 = 顧客から注文を受領済みだが、まだ出荷していない注文
     - 注文日は過去30日〜今日
-    - 要求納期は今日〜60日後
+    - 要求納期は今日〜270日後 (9ヶ月先まで均等分散)  ← Phase 10改訂
     - ステータス: confirmed / picking / shipped_partial / backorder
     """
     rows = []
@@ -207,7 +207,9 @@ def gen_sales_orders(prods, comps, bom, cus):
         cust = cus[cus["customer_id"] == prod["customer_id"]].iloc[0]
 
         order_date = TODAY - timedelta(days=rng.randint(1, 30))
-        requested_date = TODAY + timedelta(days=rng.randint(0, 60))
+        # Phase 10: 要求納期を 4〜270日後 (9ヶ月) に均等分散させる
+        # 従来の 0〜60日 集中から改善し、在庫健全性への消費スパイクを解消
+        requested_date = TODAY + timedelta(days=rng.randint(4, 270))
         qty = rng.randint(5, 150) * 5  # 小ロット化
 
         status = rng.choice(statuses)
@@ -217,32 +219,43 @@ def gen_sales_orders(prods, comps, bom, cus):
         elif status == "picking":
             shipped_qty = 0
 
+        # 派生日付フィールド (silver_sales_orders が必要)
+        response_date   = order_date + timedelta(days=rng.randint(1, 3))
+        earliest_ship   = requested_date - timedelta(days=rng.randint(5, 14))
+        deadline_date   = requested_date + timedelta(days=rng.randint(2, 7))
+        partial_qty     = int(qty * rng.uniform(0.3, 0.7)) if status == "shipped_partial" else 0
+
         # BOM展開: この製品に必要な部品
         bom_rows = bom[bom["product_id"] == prod["product_id"]]
 
         for _, b in bom_rows.iterrows():
             comp_qty = (qty - shipped_qty) * b["quantity_per_unit"]
             rows.append({
-                "sales_order_id": f"SO{oid:06d}",
-                "customer_id": cust["customer_id"],
-                "customer_name": cust["customer_name"],
-                "product_id": prod["product_id"],
-                "product_name": prod["product_name"],
-                "component_id": b["component_id"],
-                "order_date": order_date.isoformat(),
+                "sales_order_id":          f"SO{oid:06d}",
+                "customer_id":             cust["customer_id"],
+                "customer_name":           cust["customer_name"],
+                "product_id":              prod["product_id"],
+                "product_name":            prod["product_name"],
+                "component_id":            b["component_id"],
+                "order_date":              order_date.isoformat(),
                 "requested_delivery_date": requested_date.isoformat(),
-                "order_qty": qty,
-                "shipped_qty": shipped_qty,
-                "remaining_qty": qty - shipped_qty,
-                "component_required_qty": int(comp_qty),
-                "status": status,
-                "priority_flag": requested_date <= TODAY + timedelta(days=7),
+                "response_date":           response_date.isoformat(),
+                "earliest_ship_date":      earliest_ship.isoformat(),
+                "deadline_date":           deadline_date.isoformat(),
+                "order_qty":               qty,
+                "shipped_qty":             shipped_qty,
+                "remaining_qty":           qty - shipped_qty,
+                "component_required_qty":  int(comp_qty),
+                "partial_available_qty":   partial_qty,
+                "status":                  status,
+                "priority_flag":           requested_date <= TODAY + timedelta(days=7),
             })
         oid += 1
 
     df = pd.DataFrame(rows)
     df.to_csv(OUT / "sales_orders.csv", index=False, encoding="utf-8-sig")
     print(f"  sales_orders.csv: {len(df)} rows ({df['sales_order_id'].nunique()} orders)")
+    print(f"     requested_delivery_date: {df['requested_delivery_date'].min()} ~ {df['requested_delivery_date'].max()}")
     return df
 
 

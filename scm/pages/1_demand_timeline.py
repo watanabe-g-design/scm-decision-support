@@ -98,7 +98,11 @@ df = df[df["requested_date"] <= today + timedelta(days=months_ahead * 30)]
 st.markdown("---")
 
 # ── 3タブ ──
-tab1, tab2, tab3 = st.tabs(["📊 月別需要サマリー", "📈 FCST vs 実績", "🚨 緊急手動入力 & 要対応Top10"])
+tab1, tab2, tab3 = st.tabs([
+    "📊 部材 月別需要サマリー（製品FCST×BOM展開）",
+    "📈 製品 FCST vs 実績",
+    "🚨 緊急手動入力（部材レベル）",
+])
 
 # ─── Tab 1: 月別サマリー ───────────────────────────────────────────
 with tab1:

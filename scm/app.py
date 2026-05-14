@@ -99,12 +99,13 @@ demand_filtered = filter_by_period(demand, "requested_date", today, period_days,
 st.markdown("---")
 
 # ────────────────────────────────────────────────────────
-# Section 0: 📌 納期コミット (顧客への納期コミット — 最優先)
+# Section 0: 製品の顧客納期コミット (受注ベース)
 # ────────────────────────────────────────────────────────
-st.markdown("### 📌 顧客への納期コミット (いつまでに何をすべきか)")
+st.markdown("### 📌 **製品** の顧客納期コミット（受注ベース）")
 st.caption(
-    "顧客から受注した案件の納期コミット状況。"
+    "顧客から受注した**製品**の納期コミット状況。"
     "**Critical = 残3日以内 / High = 残7日以内** が今日〜今週中に動くべき最優先案件です。"
+    "（このセクションは製品レベルの受注を見ています。半導体部材の調達優先度は下のセクションを参照。）"
 )
 
 if not commit_risk.empty:
@@ -149,9 +150,9 @@ else:
 st.markdown("---")
 
 # ────────────────────────────────────────────────────────
-# Section 1: 需要サマリー
+# Section 1: 半導体部材の需要サマリー (FCSTから展開)
 # ────────────────────────────────────────────────────────
-st.markdown(f"### 📋 需要サマリー（対象期間: {sel_period}）")
+st.markdown(f"### 📋 **半導体部材** 需要サマリー（FCSTから展開、対象期間: {sel_period}）")
 
 demand_total     = kpi_demand_total(demand_filtered)
 demand_emergency = kpi_demand_emergency(demand_filtered)
@@ -188,18 +189,20 @@ with k3:
 st.markdown("---")
 
 # ────────────────────────────────────────────────────────
-# Section 2: 調達アクション (Critical/High/Medium/OK)
+# Section 2: 半導体部材の調達アクション優先度 (期間フィルター連動)
 # ────────────────────────────────────────────────────────
-st.markdown("### 🎯 調達アクション優先度")
+st.markdown("### 🎯 **半導体部材** 調達アクション優先度")
 st.caption(
-    "調達ルート評価 (4ルート) により、各需要の対応優先度を自動判定。"
-    "**Critical = 今すぐ動く**, **High = 今週中に動く** が最重要です。"
+    "FCST×BOM展開された**半導体部材**ごとの調達ルート評価 (4ルート) による優先度判定。"
+    "**Critical (🔴) = 今すぐ新規発注**, **High (🟠) = 今週中にマクニカ相談** が最重要。"
+    f"（表示期間: {sel_period}）"
 )
 
 if not options.empty and not demand_filtered.empty:
     opt = options.copy()
     opt["requested_date"] = pd.to_datetime(opt["requested_date"], errors="coerce").dt.date
-    opt = filter_by_period(opt, "requested_date", today, period_days, past_buffer_days=0)
+    # 「今月 (30日以内)」で絞り込み → Critical件数を現実的に抑制
+    opt = filter_by_period(opt, "requested_date", today, min(period_days, 90), past_buffer_days=0)
 
     best = aggregate_best_route_per_demand(opt)
     level_counts = kpi_action_count_by_level(best)
@@ -254,11 +257,11 @@ if not options.empty and not demand_filtered.empty:
         needs["Priority"] = needs["action_level"].apply(action_level_label_jp)
         needs["推奨ルート"] = needs["route_type"].apply(route_label_jp)
 
+        # P2-1: shortage_qty 列を削除（常に0のため不要）
         display_cols = [
-            "demand_id", "part_number", "component_name",
+            "part_number", "component_name",
             "requested_date", "requested_qty",
             "Priority", "推奨ルート",
-            "shortage_qty", "days_late",
         ]
         cols_present = [c for c in display_cols if c in needs.columns]
         df_show = rename_columns(needs[cols_present].head(10))
@@ -270,32 +273,6 @@ else:
     st.info("gold_procurement_options が未生成です。Lakeflow パイプラインを実行してください。")
 
 st.markdown("---")
-
-# ────────────────────────────────────────────────────────
-# Section 3: 在庫サマリー (コンパクト)
-# ────────────────────────────────────────────────────────
-st.markdown("### 📦 在庫サマリー")
-render_inventory_legend()
-st.markdown("")
-
-cust_kpi = kpi_customer_stock(cust_inv)
-free_kpi = kpi_macnica_free_stock(free_inv)
-
-i1, i2, i3, i4 = st.columns(4)
-i1.metric("🏭 顧客在庫 数量", f"{cust_kpi['total_qty']:,} 個",
-          help="顧客自身が保有する自社倉庫の在庫合計")
-i2.metric("🏭 顧客在庫 品目数", f"{cust_kpi['n_components']} 品目")
-i3.metric("📦 マクニカフリー在庫 数量", f"{free_kpi['total_qty']:,} 個",
-          help="マクニカ新子安が本顧客向けに引当済の在庫合計")
-i4.metric("📦 マクニカフリー 品目数", f"{free_kpi['n_components']} 品目")
-
-cols = st.columns(2)
-with cols[0]:
-    render_drill_down_button("🏭 顧客在庫×安全在庫モニター", "pages/8_inventory_health.py",
-                              filter_payload={}, key="drill_cust_inv")
-with cols[1]:
-    render_drill_down_button("📦 マクニカフリー在庫の詳細", "pages/4_macnica_free_inventory.py",
-                              filter_payload={}, key="drill_free_inv")
 
 st.markdown("---")
 
