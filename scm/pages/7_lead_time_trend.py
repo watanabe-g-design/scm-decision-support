@@ -87,6 +87,8 @@ k4.metric("📊 平均LT", f"{avg_lt:.1f} 週",
 # ────────────────────────────────────────────────────────
 # 急騰アラート (LT変化が大きい部材を目立つカードで表示)
 # ────────────────────────────────────────────────────────
+st.markdown("---")
+# ⑤+⑥ React #185回避: 大きなHTMLカードをデフォルト折りたたみのExpander内に配置
 if not escal.empty:
     escal_top = escal.copy()
     for c in ("delta_vs_n3", "delta_vs_n6", "latest_lt_weeks"):
@@ -95,69 +97,37 @@ if not escal.empty:
     escal_top["_worst"] = escal_top[["delta_vs_n3", "delta_vs_n6"]].fillna(0).max(axis=1)
     escal_top = escal_top.sort_values("_worst", ascending=False).head(5)
 
-    st.markdown("---")
-    st.markdown("### 🚨 LT急騰インサイト（上位5件 — 推奨アクション付き）")
-    st.caption(
-        "3ヶ月前または6ヶ月前と比較してLTが急増している部材を抽出し、"
-        "**新規発注タイミングの前倒し週数を自動計算** しました。"
-        "各カードの『推奨アクション』に従って発注タイミングを調整してください。"
-    )
-    for _, row in escal_top.iterrows():
-        d3 = int(row.get("delta_vs_n3", 0) or 0)
-        d6 = int(row.get("delta_vs_n6", 0) or 0)
-        worst = max(d3, d6)
-        latest_lt = int(row.get("latest_lt_weeks", 0) or 0)
-        # 推奨前倒し週数: 急騰幅 + 安全マージン2週
-        recommended_acceleration = max(worst + 2, 2)
-        # 推奨発注前倒し日付 (今日 - 通常発注日 = LT。それを「前倒し」)
-        # 業務的な表現: "新規発注は通常より N 週早めに開始してください"
-
-        # 影響想定: 現在LTを反映した「今日発注→入荷見込み」
-        from datetime import timedelta as _td
-        eta_iso = (today + _td(weeks=int(latest_lt))).isoformat()
-        # 比較として、N-3LT を使った旧見込みも参考表示
-        old_lt = int(row.get("lt_n3_weeks", latest_lt - d3) or (latest_lt - d3))
-        old_eta_iso = (today + _td(weeks=int(max(old_lt, 1)))).isoformat()
-
-        reason = str(row.get("escalation_reason", row.get("remark", "LT延長中")) or "LT延長中")
-        st.markdown(
-            f"""
-            <div class="lt-alert-card">
-                <div class="lt-alert-card-title">
-                    ⚠️ {row.get("item_code","—")} — {row.get("item_name","—")}
-                </div>
-                <div class="lt-alert-card-body">
-                    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:10px;">
-                        <div>
-                            <span style="font-size:10px;color:#7f1d1d;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;">現在LT</span>
-                            <div style="font-size:18px;font-weight:700;color:#7f1d1d;">{latest_lt}週</div>
-                        </div>
-                        <div>
-                            <span style="font-size:10px;color:#7f1d1d;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;">前比増</span>
-                            <div style="font-size:18px;font-weight:700;color:#7f1d1d;">+{d3}週 (3M) / +{d6}週 (6M)</div>
-                        </div>
-                        <div>
-                            <span style="font-size:10px;color:#7f1d1d;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;">今日発注→入荷</span>
-                            <div style="font-size:18px;font-weight:700;color:#7f1d1d;">{eta_iso}</div>
-                        </div>
-                        <div>
-                            <span style="font-size:10px;color:#7f1d1d;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;">旧LTでの入荷見込み</span>
-                            <div style="font-size:14px;color:#a16207;text-decoration:line-through;">{old_eta_iso}</div>
-                        </div>
-                    </div>
-                    <div style="padding:10px 12px;background:#fff;border-radius:8px;border:1px solid #fecaca;">
-                        <span style="font-weight:600;color:#7f1d1d;">📝 推奨アクション</span>:
-                        新規発注は <strong style="color:#dc2626;">通常より {recommended_acceleration}週 前倒し</strong> で実行してください。
-                        理由: LTが{worst}週延長したため、納期遅延を防ぐには急増分 + 安全マージン2週分の前倒しが必要です。
-                    </div>
-                    <div style="margin-top:6px;font-size:11px;color:#a16207;">理由詳細: {reason}</div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    with st.expander(f"🚨 LT急騰インサイト（上位{len(escal_top)}件 — クリックで展開）", expanded=False):
+        st.caption(
+            "3ヶ月前または6ヶ月前と比較してLTが急増している部材を抽出。"
+            "**新規発注タイミングの前倒し週数を自動計算** しています。"
         )
+        from datetime import timedelta as _td
+        for _, row in escal_top.iterrows():
+            d3 = int(row.get("delta_vs_n3", 0) or 0)
+            d6 = int(row.get("delta_vs_n6", 0) or 0)
+            worst = max(d3, d6)
+            latest_lt = int(row.get("latest_lt_weeks", 0) or 0)
+            recommended_acceleration = max(worst + 2, 2)
+            eta_iso = (today + _td(weeks=int(latest_lt))).isoformat()
+            old_lt = int(row.get("lt_n3_weeks", latest_lt - d3) or max(latest_lt - d3, 1))
+            old_eta_iso = (today + _td(weeks=int(max(old_lt, 1)))).isoformat()
+            reason = str(row.get("escalation_reason", row.get("remark", "LT延長中")) or "LT延長中")
+
+            with st.container():
+                st.markdown(f"#### ⚠️ {row.get('item_code','—')} — {row.get('item_name','—')}")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("現在LT", f"{latest_lt} 週")
+                m2.metric("前比増", f"+{d3}週 (3M) / +{d6}週 (6M)")
+                m3.metric("今日発注→入荷", eta_iso)
+                m4.metric("旧LTでの見込み", old_eta_iso)
+                st.warning(
+                    f"📝 **推奨アクション**: 新規発注は通常より **{recommended_acceleration}週 前倒し** で実行。"
+                    f"  理由: LTが{worst}週延長したため、納期遅延を防ぐには急増分 + 安全マージン2週分の前倒しが必要です。"
+                )
+                st.caption(f"理由詳細: {reason}")
+                st.markdown("---")
 else:
-    st.markdown("---")
     st.success("✅ LT急騰アラートはありません。すべての部材のLTは安定しています。")
 
 st.markdown("---")
@@ -258,13 +228,17 @@ with lt_tab3:
             + "  ｜  " + pick_df["part_number"].fillna("").astype(str)
             + "  ｜  " + pick_df["component_name"].fillna("").astype(str)
         )
-        top3 = filtered.nlargest(3, "latest_lt_weeks")["item_id"].tolist() if not filtered.empty else []
-        default_labels = pick_df[pick_df["component_id"].isin(top3)]["_label"].tolist()
+        # React #185回避: default を session_state で安定化 (毎回再計算しない)
+        if "lt_trend_default_labels" not in st.session_state:
+            top3 = filtered.nlargest(3, "latest_lt_weeks")["item_id"].tolist() if not filtered.empty else []
+            default_labels = pick_df[pick_df["component_id"].isin(top3)]["_label"].tolist()
+            st.session_state["lt_trend_default_labels"] = default_labels[:3]
 
         sel_labels = st.multiselect(
             "📊 LT推移を見たい部材（最大10件まで選択推奨）",
-            pick_df["_label"].tolist(),
-            default=default_labels[:3],
+            options=pick_df["_label"].tolist(),
+            default=st.session_state["lt_trend_default_labels"],
+            key="lt_trend_multiselect",
         )
         if sel_labels:
             sel_ids = [s.split("  ｜  ", 1)[0].strip() for s in sel_labels]

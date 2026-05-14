@@ -247,8 +247,8 @@ if submit:
         card_html = (
             f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;'
             f'padding:18px 20px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">'
+            # ヘッダー: タイトル内の①②... を使い「案N」の二重表記を削除
             f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">'
-            f'<span style="font-size:11px;font-weight:700;color:#94a3b8;">案{i}</span>'
             f'<span style="font-size:15px;font-weight:600;color:#0f172a;flex:1;">{opt_a.title}</span>'
             f'<span style="background:{feas_bg};color:{feas_color};border:1px solid {feas_border};'
             f'border-radius:6px;padding:3px 10px;font-size:12px;font-weight:600;">{opt_a.feasibility}</span>'

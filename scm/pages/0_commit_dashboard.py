@@ -288,95 +288,75 @@ with tab_crit:
                 .reset_index()[["component_id", "route_type", "available_qty", "shortage_qty", "action_level"]]
             )
 
-        for _, row in crit.iterrows():
-            days = int(row.get("days_to_due", 0))
+        # React #185回避: 複雑なHTMLカード→Streamlitネイティブコンポーネントへ
+        for idx, (_, row) in enumerate(crit.iterrows()):
+            try:
+                days = int(pd.to_numeric(row.get("days_to_due", 0), errors="coerce") or 0)
+            except Exception:
+                days = 0
             comp_id = row.get("component_id", "")
             days_label = (f"納期超過 {abs(days)}日" if days < 0 else f"残 {days} 日")
-            days_color = t["red"]
 
-            # この受注の部材についてのボトルネック情報
-            route_info = best_route[best_route["component_id"] == comp_id].iloc[0] if (
-                not best_route.empty and comp_id in best_route["component_id"].values
-            ) else None
+            # ボトルネック情報を取得
+            route_info = None
+            if not best_route.empty and comp_id in best_route["component_id"].values:
+                route_info = best_route[best_route["component_id"] == comp_id].iloc[0]
 
-            # 推奨アクション文を生成
+            # 推奨アクション生成
+            try:
+                required = int(pd.to_numeric(row.get("component_required_qty", 0), errors="coerce") or 0)
+                cust_stock = int(pd.to_numeric(row.get("current_customer_stock", 0), errors="coerce") or 0)
+                remaining = int(pd.to_numeric(row.get("remaining_qty", 0), errors="coerce") or 0)
+            except Exception:
+                required = cust_stock = remaining = 0
+
             if route_info is not None:
                 al = str(route_info.get("action_level", ""))
-                avail = int(route_info.get("available_qty", 0))
-                short = int(row.get("component_required_qty", 0)) - avail
+                avail = int(pd.to_numeric(route_info.get("available_qty", 0), errors="coerce") or 0)
+                short = required - avail
                 route = str(route_info.get("route_type", ""))
-
                 if al == "不要" or short <= 0:
-                    action_who = "（対応不要）"
-                    action_what = "顧客在庫で充足可能です。"
-                    action_color = "#059669"
+                    action_who, action_what = "（対応不要）", "顧客在庫で充足可能です。"
                 elif al in ("軽", "中"):
                     action_who = "📞 マクニカ 営業担当へ連絡"
-                    if route == "MACNICA_FREE":
-                        action_what = f"フリー在庫 {avail:,}個 の引当依頼（今日中）"
-                    else:
-                        action_what = "既存発注残BL の納期前倒し・催促依頼（今週中）"
-                    action_color = t["orange"]
+                    action_what = (f"フリー在庫 {avail:,}個 の引当依頼（今日中）" if route == "MACNICA_FREE"
+                                   else "既存発注残BL の納期前倒し・催促依頼（今週中）")
                 else:
                     action_who = "📩 マクニカ 調達部へ緊急発注依頼"
                     action_what = f"新規追加発注が必要。不足見込み {max(short, 0):,}個。LT確認後に即時手配。"
-                    action_color = t["red"]
             else:
                 action_who = str(row.get("adjustment_action", "—"))
                 action_what = str(row.get("risk_reason", "—"))
-                action_color = t["orange"]
 
-            # ボトルネック部材の在庫状況
-            cust_stock = int(row.get("current_customer_stock", 0))
-            required = int(row.get("component_required_qty", 0))
-            stock_status = "充足" if cust_stock >= required else f"不足 {max(0, required - cust_stock):,}個"
-            stock_color = "#059669" if cust_stock >= required else t["red"]
+            stock_status = "✅ 充足" if cust_stock >= required else f"⚠️ 不足 {max(0, required - cust_stock):,}個"
 
-            # カード HTML
-            card = (
-                f'<div style="background:#ffffff;border:1.5px solid {t["border_strong"]};'
-                f'border-left:5px solid {action_color};border-radius:12px;'
-                f'padding:18px 20px;margin-bottom:14px;box-shadow:0 2px 6px rgba(0,0,0,0.07);">'
+            # Streamlit native container
+            with st.container():
+                st.markdown(
+                    f"### 🔴 {row.get('sales_order_id', '—')} ｜ "
+                    f"{row.get('customer_name', '—')} → {row.get('product_name', '—')}"
+                )
+                meta = (
+                    f"**希望納期:** {row.get('requested_delivery_date', '—')}　｜　"
+                    f"**{days_label}**　｜　**残数量:** {remaining:,}個"
+                )
+                st.markdown(meta)
 
-                # ヘッダー
-                f'<div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:14px;">'
-                f'<div style="flex:1;">'
-                f'<div style="font-size:15px;font-weight:700;color:{t["text"]};margin-bottom:4px;">'
-                f'🔴 {row.get("sales_order_id","—")} ｜ {row.get("customer_name","—")} → {row.get("product_name","—")}'
-                f'</div>'
-                f'<div style="font-size:13px;color:{t["sub"]};">'
-                f'希望納期: <b>{row.get("requested_delivery_date","—")}</b>　'
-                f'<span style="color:{days_color};font-weight:700;">{days_label}</span>　'
-                f'残数量: {int(row.get("remaining_qty", 0)):,}個'
-                f'</div>'
-                f'</div></div>'
-
-                # 2カラム: 不足状況 | 推奨アクション
-                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">'
-
-                # 左: ボトルネック部材
-                f'<div style="background:#f8fafc;border-radius:8px;padding:14px;">'
-                f'<div style="font-size:10px;font-weight:600;color:{t["sub"]};text-transform:uppercase;'
-                f'letter-spacing:0.6px;margin-bottom:8px;">🔍 半導体部材の状況</div>'
-                f'<div style="font-size:13px;color:{t["text"]};line-height:1.6;">'
-                f'品番: <b>{row.get("part_number","—")}</b><br>'
-                f'部材名: {row.get("component_name","—")}<br>'
-                f'必要数: {required:,}個 ｜ 顧客現在庫: {cust_stock:,}個<br>'
-                f'<span style="color:{stock_color};font-weight:700;">→ {stock_status}</span>'
-                f'</div></div>'
-
-                # 右: 推奨アクション
-                f'<div style="background:#fffbeb;border-radius:8px;padding:14px;">'
-                f'<div style="font-size:10px;font-weight:600;color:{t["sub"]};text-transform:uppercase;'
-                f'letter-spacing:0.6px;margin-bottom:8px;">📝 推奨アクション</div>'
-                f'<div style="font-size:13px;color:{t["text"]};line-height:1.6;">'
-                f'<span style="font-weight:700;color:{action_color};">{action_who}</span><br>'
-                f'{action_what}'
-                f'</div></div>'
-
-                f'</div></div>'
-            )
-            st.markdown(card, unsafe_allow_html=True)
+                col_left, col_right = st.columns(2)
+                with col_left:
+                    st.markdown("#### 🔍 半導体部材の状況")
+                    st.markdown(
+                        f"- 品番: **{row.get('part_number', '—')}**\n"
+                        f"- 部材名: {row.get('component_name', '—')}\n"
+                        f"- 必要数: **{required:,}個** ｜ 顧客現在庫: **{cust_stock:,}個**\n"
+                        f"- 在庫状況: **{stock_status}**"
+                    )
+                with col_right:
+                    st.markdown("#### 📝 推奨アクション")
+                    st.markdown(
+                        f"**{action_who}**\n\n{action_what}"
+                    )
+                st.markdown("---")
 
 # ────────────────────────────────────────────────────────
 # 使い方ガイド

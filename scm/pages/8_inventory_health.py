@@ -68,10 +68,31 @@ drill_comp_id = drill.get("component_id") if drill else None
 
 st.markdown("## 🏭 顧客在庫×安全在庫モニター")
 st.caption(
-    "顧客自社倉庫が保有する在庫を月別に可視化。"
+    "顧客自社倉庫が保有する**半導体部材**の月別在庫予測を可視化。"
     "**ZERO**=在庫切れ / **UNDER**=安全在庫割れ / **OK**=健全 / **OVER**=過剰。"
     "各部材を展開すると、月別の入出庫テーブル + 安全在庫レンジ付きグラフが表示されます。"
 )
+
+# 健全性が低い場合のデータ更新案内
+with st.expander("ℹ️ 在庫健全性スコアが想定より低い場合", expanded=False):
+    st.markdown(
+        """
+**スコアが30〜40%程度の場合**: Databricks側のデータ更新がまだ反映されていない可能性があります。
+
+**Phase 10 改修内容**:
+- `sales_orders` の `requested_delivery_date` を 9ヶ月に均等分散 (従来: 0〜60日に集中)
+- スマートPO生成 (FCST連動のグループ別カバー率)
+- これにより**ローカル検証で71.3%の健全性**を達成済み
+
+**Databricks反映手順**:
+1. `sample_data/*.csv` (sales_orders / purchase_orders / inventory_current / macnica_free_inventory / demand_plan_components / forecasts) を Volume にアップロード
+2. Lakeflow Pipeline (DLT) を再実行 → Bronze→Silver→Gold が更新される
+3. Apps をリロード (ブラウザF5)
+4. 期待値: 健全性スコア ≈ **70%前後**
+
+**もし手順実施後もスコアが低い場合**: 期間フィルター・部材選択・データ自体に問題がないか確認してください。
+"""
+    )
 
 if proj.empty:
     st.warning("gold_balance_projection_monthly が空です。Lakeflow パイプラインを実行してください。")
