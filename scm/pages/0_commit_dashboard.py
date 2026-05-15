@@ -239,44 +239,68 @@ with tab_list:
     if df.empty:
         st.info("条件に該当する受注がありません。")
     else:
-        # React #185対策: 大量データのレンダリング負荷を軽減
+        # React #185対策: st.dataframe を完全に回避してHTMLテーブルで描画
         df_show = df.copy()
-        # 型を確実にstring化してReactの差分検知を安定化
         for col in ["sales_order_id","customer_name","product_name","part_number",
-                    "adjustment_action","risk_reason"]:
+                    "adjustment_action","priority_rank"]:
             if col in df_show.columns:
                 df_show[col] = df_show[col].fillna("").astype(str)
-        for col in ["days_to_due","remaining_qty","current_customer_stock"]:
+        for col in ["days_to_due","remaining_qty"]:
             if col in df_show.columns:
                 df_show[col] = pd.to_numeric(df_show[col], errors="coerce").fillna(0).astype(int)
 
         priority_order = {"Critical": 0, "High": 1, "Mid": 2, "Low": 3}
         df_show["_p"] = df_show["priority_rank"].map(priority_order).fillna(9)
         df_show = df_show.sort_values(["_p", "days_to_due"]).drop(columns="_p")
-        priority_display = {"Critical": "🔴 Critical", "High": "🟠 High", "Mid": "🟡 Mid", "Low": "🟢 Low"}
-        df_show["Priority"] = df_show["priority_rank"].map(priority_display).fillna(df_show["priority_rank"])
 
-        # 表示上限: 200行 (パフォーマンス確保)
-        MAX_ROWS = 200
+        # 受注ID単位で重複削除 (BOM展開で受注ごとに複数行ある状態を解消)
+        if "sales_order_id" in df_show.columns:
+            df_show = df_show.drop_duplicates(subset=["sales_order_id"])
+
+        MAX_ROWS = 100
         total_rows = len(df_show)
         if total_rows > MAX_ROWS:
             df_show = df_show.head(MAX_ROWS)
             st.caption(f"⚠️ 全{total_rows:,}件中、上位 {MAX_ROWS} 件を表示。フィルターで絞り込むと全件確認可能。")
 
-        show_cols = [
-            ("sales_order_id",         "受注ID"),
-            ("customer_name",          "顧客名"),
-            ("product_name",           "製品名"),
-            ("part_number",            "部材品番"),
-            ("requested_delivery_date","希望納期"),
-            ("days_to_due",            "残日数"),
-            ("remaining_qty",          "残数量"),
-            ("Priority",               "Priority"),
-            ("adjustment_action",      "推奨アクション"),
-        ]
-        cols_present = [(k, v) for k, v in show_cols if k in df_show.columns]
-        table = df_show[[k for k, _ in cols_present]].rename(columns=dict(cols_present))
-        st.dataframe(table, hide_index=True, use_container_width=True, height=420)
+        # ── 軽量HTMLテーブル (st.dataframe 不使用) ──
+        priority_badge = {
+            "Critical": '<span style="color:#dc2626;font-weight:600;">🔴 Critical</span>',
+            "High":     '<span style="color:#d97706;font-weight:600;">🟠 High</span>',
+            "Mid":      '<span style="color:#ca8a04;font-weight:600;">🟡 Mid</span>',
+            "Low":      '<span style="color:#059669;font-weight:600;">🟢 Low</span>',
+        }
+        header = (
+            '<thead><tr style="background:#f1f5f9;text-align:left;font-size:12px;">'
+            '<th style="padding:8px;">受注ID</th>'
+            '<th style="padding:8px;">顧客</th>'
+            '<th style="padding:8px;">製品</th>'
+            '<th style="padding:8px;">希望納期</th>'
+            '<th style="padding:8px;text-align:right;">残日数</th>'
+            '<th style="padding:8px;">Priority</th>'
+            '<th style="padding:8px;">推奨アクション</th>'
+            '</tr></thead>'
+        )
+        body_rows = []
+        for _, row in df_show.iterrows():
+            pr = priority_badge.get(row.get("priority_rank","Low"), row.get("priority_rank",""))
+            body_rows.append(
+                '<tr style="border-bottom:1px solid #e2e8f0;font-size:12px;">'
+                f'<td style="padding:8px;">{row.get("sales_order_id","")}</td>'
+                f'<td style="padding:8px;">{row.get("customer_name","")}</td>'
+                f'<td style="padding:8px;">{row.get("product_name","")}</td>'
+                f'<td style="padding:8px;">{row.get("requested_delivery_date","")}</td>'
+                f'<td style="padding:8px;text-align:right;">{row.get("days_to_due",0)}日</td>'
+                f'<td style="padding:8px;">{pr}</td>'
+                f'<td style="padding:8px;">{row.get("adjustment_action","")}</td>'
+                '</tr>'
+            )
+        html = (
+            '<div style="max-height:420px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;">'
+            '<table style="width:100%;border-collapse:collapse;">'
+            f'{header}<tbody>{"".join(body_rows)}</tbody></table></div>'
+        )
+        st.markdown(html, unsafe_allow_html=True)
 
 # ─── Tab 2: Critical ボトルネック分析 ──────────────────
 with tab_crit:

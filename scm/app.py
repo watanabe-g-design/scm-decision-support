@@ -295,16 +295,30 @@ st.markdown("---")
 st.markdown("---")
 
 # ────────────────────────────────────────────────────────
-# Section 4: 供給能力モニター (コンパクト)
+# Section 4: 製品 → 部材 連鎖サマリー (BOM充足とCritical部材の連動)
 # ────────────────────────────────────────────────────────
-st.markdown("### 🧩 供給能力モニター")
-st.caption("BOM充足 / LT延長 の確認。詳細は各ページで。")
+st.markdown("### 🔗 製品 → 半導体部材 連鎖（ドリルダウン構造）")
+st.caption(
+    "**製品BOM充足** → **不足部材** → **調達アクション** の3段階の繋がりを可視化。"
+    "「製品が作れない」事象が、どの半導体部材の調達状況に紐づいているかを示します。"
+)
 
 n_lt_escal = len(lt_escal) if not lt_escal.empty else 0
 bom_kpi = kpi_bom_fulfillment(bom_fulfill)
 
-s1, s2 = st.columns(2)
-with s1:
+# BOM充足ビューで「生産困難」な製品×月から不足部材数を集計
+n_bom_shortage_comps = 0
+if not bom_fulfill.empty:
+    bom_crit = bom_fulfill.copy()
+    bom_crit["fulfillment_rate"] = pd.to_numeric(bom_crit["fulfillment_rate"], errors="coerce").fillna(0)
+    bom_crit = bom_crit[bom_crit["fulfillment_rate"] < 0.8]
+    if "heavy_action_components" in bom_crit.columns:
+        n_bom_shortage_comps = int(
+            pd.to_numeric(bom_crit["heavy_action_components"], errors="coerce").fillna(0).sum()
+        )
+
+cl1, cl2, cl3 = st.columns(3)
+with cl1:
     st.metric(
         "🔴 生産困難 製品×月",
         f"{bom_kpi['critical']} 件",
@@ -312,7 +326,16 @@ with s1:
     )
     render_drill_down_button("🧩 BOM充足ビューへ", "pages/6_bom_fulfillment.py",
                               filter_payload={}, key="drill_bom")
-with s2:
+with cl2:
+    st.metric(
+        "🔗 不足部材 (BOM起因)",
+        f"{n_bom_shortage_comps} 件",
+        help="生産困難な製品×月に紐づく、対応レベル「重」(Critical) の部材需要件数。"
+             "上記の生産困難件数 × 各製品の不足BOM部材数の合計。",
+    )
+    render_drill_down_button("🎯 該当部材を見る", "pages/2_action_center.py",
+                              filter_payload={"action_level": "重"}, key="drill_bom_comp")
+with cl3:
     st.metric(
         "⏳ LT延長中の部材",
         f"{n_lt_escal} 品目",
@@ -320,6 +343,14 @@ with s2:
     )
     render_drill_down_button("⏳ LT推移を確認", "pages/7_lead_time_trend.py",
                               filter_payload={}, key="drill_lt")
+
+# 連鎖の説明
+st.caption(
+    f"💡 **読み解き方**: 「{bom_kpi['critical']}件の製品×月が生産困難」"
+    f" → 「これらの製品BOM上で **{n_bom_shortage_comps}件** の部材が不足 (Critical)」"
+    f" → 「上記Section 2の部材Critical {level_counts.get('重', 0) if 'level_counts' in dir() else '?'}件 と整合」"
+    "  右の「🎯 該当部材を見る」で具体的な調達アクションへ。"
+)
 
 # Pipeline status (1行)
 st.markdown("")
