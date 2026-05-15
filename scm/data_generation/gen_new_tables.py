@@ -504,7 +504,11 @@ def gen_demand_plan_components(
     purchase_orders_df: pd.DataFrame,
     doomed_comp_ids: set[str],
     partial_comp_ids: set[str],
+    doomed_pid: str = "",
+    partial_product_ids: list[str] = None,
 ) -> pd.DataFrame:
+    if partial_product_ids is None:
+        partial_product_ids = []
     rows = []
     demand_id = 1
 
@@ -559,35 +563,28 @@ def gen_demand_plan_components(
                 for pm in PARTIAL_MONTHS
             )
 
-            if comp_id in doomed_comp_ids:
-                if is_target_month:
-                    # Critical (重): 4月のみ、全ルートを超える需要
+            # Phase 13: Criticalを doomed_pid 製品の需要のみに限定 (他の製品ではnormal)
+            # → 結果: doomed_pidのBOM部材数 (~6) = 6 Critical demands
+            if comp_id in doomed_comp_ids and product_id == doomed_pid and is_target_month:
+                # Critical (重): doomed_pid × 4月のみ
+                required_qty = min(
+                    max(int(total_cap * rng.uniform(1.4, 1.9)) + 100, SHORTAGE_LARGE_MIN_QTY),
+                    MAX_DEMAND_QTY,
+                )
+            elif comp_id in partial_comp_ids and product_id in partial_product_ids and is_partial_month:
+                # High (中): partial_pids × 4-5月のみ
+                if total_cap > max_single + 100:
+                    lo = max_single + 50
+                    hi = max(total_cap - 50, lo + 50)
+                    required_qty = min(rng.randint(lo, hi), MAX_DEMAND_QTY)
+                else:
                     required_qty = min(
-                        max(int(total_cap * rng.uniform(1.4, 1.9)) + 100, SHORTAGE_LARGE_MIN_QTY),
+                        max(int(total_cap * 1.3) + 100, SHORTAGE_LARGE_MIN_QTY),
                         MAX_DEMAND_QTY,
                     )
-                else:
-                    # その他の月は通常需要 (充足させる)
-                    required_qty = rng.randint(NORMAL_DEMAND_MIN, NORMAL_DEMAND_MAX)
-
-            elif comp_id in partial_comp_ids:
-                if is_partial_month:
-                    # High (中): 4-5月の2ヶ月
-                    if total_cap > max_single + 100:
-                        lo = max_single + 50
-                        hi = max(total_cap - 50, lo + 50)
-                        required_qty = min(rng.randint(lo, hi), MAX_DEMAND_QTY)
-                    else:
-                        required_qty = min(
-                            max(int(total_cap * 1.3) + 100, SHORTAGE_LARGE_MIN_QTY),
-                            MAX_DEMAND_QTY,
-                        )
-                else:
-                    # その他の月は通常需要
-                    required_qty = rng.randint(NORMAL_DEMAND_MIN, NORMAL_DEMAND_MAX)
 
             else:
-                # 通常需要 (OK)
+                # 通常需要 (OK) — doomed/partial部材でも doomed_pid/partial_pids 以外の製品ではnormal
                 if cust_only > 500:
                     required_qty = rng.randint(
                         NORMAL_DEMAND_MIN,
@@ -860,6 +857,8 @@ def main():
         forecasts_df, bom_df, products_df, components_df,
         inventory_df, free_inv_df, po_all,
         doomed_cids, partial_cids,
+        doomed_pid=doomed_pid,
+        partial_product_ids=partial_pids,
     )
     demand_df.to_csv(OUT / "demand_plan_components.csv", index=False, encoding="utf-8-sig")
     # (purchase_orders.csv は po_all として⑦で保存済み)

@@ -181,7 +181,7 @@ def generate_action_options(
     if new_days_late > 0:
         steps_new.append(f"⚠️ 希望納期から {new_days_late} 日遅延見込み")
     options.append(ActionOption(
-        title="⑤ 新規追加発注",
+        title="⑤ 新規発注の手配計画（メーカー経由）",
         steps=steps_new,
         eta_date=new_eta,
         feasibility="要相談",
