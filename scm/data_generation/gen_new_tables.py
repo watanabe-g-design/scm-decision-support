@@ -141,17 +141,15 @@ def _assign_inventory_groups(
     """
     90部材を4グループに分類。
 
-    グループA (60%): OK → 月次PO ≈ 消費量の100-120%
-    グループB (10%): OVER → 月次PO ≈ 消費量の160-200%
-    グループC (15%): UNDER → 月次PO ≈ 消費量の50-65%
-    グループD (15%): ZERO → 月次PO ≈ 消費量の10-20%
+    Phase 14: 健全性70%達成のため Group A 比率を増加
+    グループA (78%): OK → 月次PO ≈ 消費量の100-105%
+    グループB (5%): OVER → 月次PO ≈ 消費量の110-120%
+    グループC (10%): UNDER → 月次PO ≈ 消費量の85-92%
+    グループD (7%): ZERO → 月次PO ≈ 消費量の18-28%
     doomed/partial → ZERO (Critical/Highシナリオ維持)
-
-    Returns: {component_id: "A"/"B"/"C"/"D"}
     """
     all_comps = [c for c in components_df["component_id"].tolist()
                  if c not in doomed_cids and c not in partial_cids]
-    # seedで固定シャッフル
     shuffled = list(all_comps)
     rng.shuffle(shuffled)
     n = len(shuffled)
@@ -159,11 +157,11 @@ def _assign_inventory_groups(
     groups: dict[str, str] = {}
     for i, comp_id in enumerate(shuffled):
         ratio = i / n
-        if ratio < 0.60:
+        if ratio < 0.78:
             groups[comp_id] = "A"
-        elif ratio < 0.70:
+        elif ratio < 0.83:
             groups[comp_id] = "B"
-        elif ratio < 0.85:
+        elif ratio < 0.93:
             groups[comp_id] = "C"
         else:
             groups[comp_id] = "D"
@@ -213,13 +211,14 @@ def gen_purchase_orders_smart(
         .groupby(["component_id", "forecast_month"])["comp_qty"].sum()
         .reset_index()
     )
-    # ピーク値の80%を基準 (安定した高めのカバレッジ)
+    # Phase 14: ピーク月の消費量を基準にする (peak × 1.0)
+    # → Group A の coverage=100%でピーク月もカバー、安定OK維持
     peak_consumption = comp_monthly.groupby("component_id")["comp_qty"].max()
-    avg_consumption = (peak_consumption * 0.8).to_dict()
+    avg_consumption = peak_consumption.to_dict()
 
-    # 対象月: 2026-04 〜 2026-12
+    # 対象月: 2026-03 〜 2026-12 (Phase 14: 3月も追加して current month の消費もカバー)
     months_future = []
-    m = date(2026, 4, 1)
+    m = date(2026, 3, 1)
     while m <= date(2026, 12, 1):
         months_future.append(m)
         next_month = m.month + 1
@@ -233,11 +232,12 @@ def gen_purchase_orders_smart(
     # B: 115%でmax寄りinit→上昇傾向だが範囲内が多い
     # C: 75-80%でmin*1.2init→下降傾向 → 後半UNDER
     # D: 20-25%→ZERO
+    # Phase 14: ピーク基準なので 100% でピーク月も賄える
     coverage_params = {
-        "A": (1.00, 1.05),   # ほぼ100%: initが(min+max)/2なら7ヶ月OK維持
-        "B": (1.10, 1.20),   # 110-120%: max寄りinitから緩やかに上昇→後半OVER傾向
-        "C": (0.85, 0.92),   # 85-92%: (min+max)/2 initから徐々に下降→後半のみUNDER/ZERO
-        "D": (0.18, 0.28),   # ZERO傾向
+        "A": (1.00, 1.10),   # ピークの100-110%: 安定OK維持
+        "B": (1.25, 1.40),   # ピークの125-140%: max寄りinitから上昇→後半OVER
+        "C": (0.70, 0.85),   # ピークの70-85%: 徐々に下降→後半UNDER
+        "D": (0.15, 0.25),   # ZERO傾向
     }
 
     rows = []

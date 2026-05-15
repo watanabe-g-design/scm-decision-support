@@ -239,12 +239,30 @@ with tab_list:
     if df.empty:
         st.info("条件に該当する受注がありません。")
     else:
+        # React #185対策: 大量データのレンダリング負荷を軽減
         df_show = df.copy()
+        # 型を確実にstring化してReactの差分検知を安定化
+        for col in ["sales_order_id","customer_name","product_name","part_number",
+                    "adjustment_action","risk_reason"]:
+            if col in df_show.columns:
+                df_show[col] = df_show[col].fillna("").astype(str)
+        for col in ["days_to_due","remaining_qty","current_customer_stock"]:
+            if col in df_show.columns:
+                df_show[col] = pd.to_numeric(df_show[col], errors="coerce").fillna(0).astype(int)
+
         priority_order = {"Critical": 0, "High": 1, "Mid": 2, "Low": 3}
         df_show["_p"] = df_show["priority_rank"].map(priority_order).fillna(9)
         df_show = df_show.sort_values(["_p", "days_to_due"]).drop(columns="_p")
         priority_display = {"Critical": "🔴 Critical", "High": "🟠 High", "Mid": "🟡 Mid", "Low": "🟢 Low"}
         df_show["Priority"] = df_show["priority_rank"].map(priority_display).fillna(df_show["priority_rank"])
+
+        # 表示上限: 200行 (パフォーマンス確保)
+        MAX_ROWS = 200
+        total_rows = len(df_show)
+        if total_rows > MAX_ROWS:
+            df_show = df_show.head(MAX_ROWS)
+            st.caption(f"⚠️ 全{total_rows:,}件中、上位 {MAX_ROWS} 件を表示。フィルターで絞り込むと全件確認可能。")
+
         show_cols = [
             ("sales_order_id",         "受注ID"),
             ("customer_name",          "顧客名"),
@@ -255,8 +273,6 @@ with tab_list:
             ("remaining_qty",          "残数量"),
             ("Priority",               "Priority"),
             ("adjustment_action",      "推奨アクション"),
-            ("risk_reason",            "リスク理由"),
-            ("current_customer_stock", "顧客現在庫"),
         ]
         cols_present = [(k, v) for k, v in show_cols if k in df_show.columns]
         table = df_show[[k for k, _ in cols_present]].rename(columns=dict(cols_present))
