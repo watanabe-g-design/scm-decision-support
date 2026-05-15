@@ -233,9 +233,17 @@ else:
     cols_present = [c for c in show_cols if c in df.columns]
     df_show = rename_columns(
         df[cols_present],
-        extra={"total_avail_3routes": "3ルート確保可能数", "shortage_3routes": "不足数(3ルート)"},
+        extra={
+            "total_avail_3routes": "即時調達可能数 ※",
+            "shortage_3routes": "不足数",
+        },
     )
     st.dataframe(df_show, hide_index=True, use_container_width=True, height=380)
+    st.caption(
+        "※ **即時調達可能数** = 顧客在庫 + マクニカフリー在庫 + 既存発注残BL の合計。"
+        "「④ 新規追加発注」は原理上いくらでも可能なため除外しています。"
+        "新規発注の詳細は下の「4ルート比較」で確認してください。"
+    )
 
     st.markdown("---")
 
@@ -288,17 +296,17 @@ else:
         st.markdown("### 💡 具体アクション案（実行可能な選択肢を併記）")
         st.caption("各案には具体的な手順・数量・完了日を明示。比較してご判断ください。")
 
-        # P4: 用語定義パネル (⑤⑥は初出のため説明を提供)
-        with st.expander("📖 案⑤⑥の用語説明（クリックで展開）", expanded=False):
+        # 用語定義パネル (「新規発注」と「前倒し充当」の説明)
+        with st.expander("📖 新規発注・前倒し充当とは？（用語説明）", expanded=False):
             st.markdown(
                 """
-**⑤ 新規追加発注とは？**
+**新規追加発注とは？**
 マクニカ経由でメーカーへ新規に追加発注する方法。必要数量に上限はありませんが、
 部材ごとのリードタイム（LT）週数後に入荷となります。
 「今すぐ発注しても間に合わない」場合でも、できる限り早く動くことで遅延を最小化できます。
 → **依頼先**: マクニカ調達部
 
-**⑥ 翌月以降のFCSTから前倒し充当とは？**
+**翌月以降のFCSTから前倒し充当とは？**
 来月・再来月に予定している製品FCSTの需要分を、今月の緊急需要に前倒しで使う方法。
 前倒しした分は翌月の調達計画に影響しますが、在庫余裕がある月なら活用可能です。
 → **注意**: 翌月の調達手配が別途必要になります。生産FCSTの承認が前提。

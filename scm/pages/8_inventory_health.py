@@ -132,57 +132,27 @@ total_evaluated = len(proj_display)
 n_ok = int((proj_display["policy_status"] == "OK").sum()) if total_evaluated else 0
 health_pct = round(n_ok / total_evaluated * 100, 1) if total_evaluated else 0.0
 
+# 表示期間を明示
+breach_period = "2026-04 〜 2026-09 (直近6ヶ月)"
+
 k1, k2, k3, k4 = st.columns(4)
 k1.metric(
     "🩺 在庫健全性スコア",
     f"{health_pct} %",
-    help="月末予測在庫が安全在庫レンジ内（min ≤ 在庫 ≤ max）の比率。65-75%が現実的に健全な水準。",
+    help=f"月末予測在庫が安全在庫レンジ内（min≤在庫≤max）の部材×月の比率。対象期間: {breach_period}。65-75%が現実的に健全な水準。",
 )
-k2.metric("📦 管理部材数", f"{n_managed} 品目")
-k3.metric("🔴 在庫ZERO予測", f"{n_zero} 件",
-          help="表示期間内 (2026-04〜2026-09) に予測在庫が0以下となる部材×月の件数。新規発注が必要。")
-k4.metric("🟠 安全在庫割れ予測", f"{n_under} 件",
-          help="表示期間内 (2026-04〜2026-09) に予測在庫が安全在庫を割る部材×月の件数。発注タイミング前倒し検討。")
-
-# ────────────────────────────────────────────────────────
-# 需給バランス インサイト (上位リスク部材を可視化)
-# ────────────────────────────────────────────────────────
-st.markdown("")
-st.markdown("#### 📌 今すぐ確認すべき部材 (上位リスク3件)")
-st.caption("健全性に最も影響している部材を抽出。クリックで個別ビューに展開。")
-
-if not breach_df.empty:
-    risk_top = breach_df.copy()
-    risk_top["projected_stock"] = pd.to_numeric(risk_top["projected_stock"], errors="coerce").fillna(0)
-    # ZERO -> UNDER -> OVER の順、かつ first_breach が早い順
-    type_order = {"ZERO": 0, "UNDER": 1, "OVER": 2}
-    risk_top["_o"] = risk_top["breach_type"].map(type_order).fillna(9)
-    risk_top = risk_top.sort_values(["_o", "first_breach"]).drop_duplicates(subset=["item_id"]).head(3)
-
-    cols = st.columns(3)
-    for col, (_, row) in zip(cols, risk_top.iterrows()):
-        breach_type = row.get("breach_type", "ZERO")
-        breach_color = {"ZERO": "#dc2626", "UNDER": "#d97706", "OVER": "#7c3aed"}.get(breach_type, "#475569")
-        breach_label = {"ZERO": "在庫ゼロ予測", "UNDER": "安全在庫割れ", "OVER": "過剰在庫"}.get(breach_type, "—")
-        with col:
-            st.markdown(
-                f"""
-                <div class="biz-card" style="border-left:4px solid {breach_color};">
-                    <div style="font-size:11px;font-weight:600;color:{breach_color};text-transform:uppercase;letter-spacing:0.6px;">{breach_label}</div>
-                    <div style="font-size:15px;font-weight:600;color:#0f172a;margin:4px 0 8px;">
-                        {row.get('item_code', '—')}<br>
-                        <span style="font-size:13px;font-weight:400;color:#475569;">{row.get('product_name', '—')}</span>
-                    </div>
-                    <div style="font-size:12px;color:#475569;">
-                        初回発生月: <strong style="color:#0f172a;">{row.get('first_breach', '—')}</strong><br>
-                        予測在庫: <strong style="color:{breach_color};">{int(row.get('projected_stock', 0)):,}個</strong> (安全在庫 {int(row.get('min_qty', 0)):,})
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-else:
-    st.success("✅ リスク部材はありません。全部材が安全在庫レンジ内で推移する見込みです。")
+k2.metric("📦 管理部材数", f"{n_managed} 品目",
+          help="顧客在庫データが存在する半導体部材の総数。")
+k3.metric(
+    "🔴 在庫ZERO予測",
+    f"{n_zero} 件",
+    help=f"予測対象期間 ({breach_period}) に在庫が0以下となる 部材×月 の件数。1部材が3ヶ月連続してZEROなら3件。新規発注が必要。",
+)
+k4.metric(
+    "🟠 安全在庫割れ予測",
+    f"{n_under} 件",
+    help=f"予測対象期間 ({breach_period}) に在庫が安全在庫(min)を下回る 部材×月 の件数。発注タイミングの前倒しを検討。",
+)
 
 st.markdown("---")
 
@@ -233,12 +203,10 @@ if filtered.empty:
     st.info("条件に該当する部材がありません。検索/セレクタを調整してください。")
     st.stop()
 
-# ────────────────────────────────────────────────────────
-# 部材ごとに Expander で表+グラフを一体表示 (添付スクショ風)
-# ────────────────────────────────────────────────────────
 st.markdown(f"### 📊 部材別 在庫健全性（{filtered['item_id'].nunique()} 品目）")
 st.caption(
     "各部材を展開すると、月別の入出庫表 + 安全在庫レンジ付きグラフが表示されます。"
+    f"表示期間: **{breach_period}**。"
     "🔴=在庫ZERO予測月, 🟠=安全在庫割れ予測月, 🟡=過剰在庫月 をマーカーで強調。"
 )
 
@@ -386,23 +354,33 @@ for iid in ordered_ids:
 st.markdown("---")
 
 # ────────────────────────────────────────────────────────
-# 安全在庫割れアラート明細
+# アラート一覧 (折り畳み) 期間情報を明示
 # ────────────────────────────────────────────────────────
-st.markdown("### 🚨 安全在庫割れ/在庫ZERO 部材一覧（初回発生月でソート）")
-if breach_df.empty:
-    st.success("✅ 直近6ヶ月以内に安全在庫割れ/在庫切れ予測の部材はありません。")
-else:
-    show_cols = [
-        ("item_id",          "部材ID"),
-        ("item_code",        "品番"),
-        ("product_name",     "部材名"),
-        ("breach_type",      "状態"),
-        ("breach_date",      "発生月"),
-        ("projected_stock",  "予測在庫"),
-        ("min_qty",          "安全在庫"),
-        ("max_qty",          "上限在庫"),
-        ("first_breach",     "初回発生月"),
-    ]
-    cols_present = [(k, v) for k, v in show_cols if k in breach_df.columns]
-    table = breach_df[[k for k, _ in cols_present]].rename(columns=dict(cols_present))
-    st.dataframe(table, hide_index=True, use_container_width=True, height=320)
+alert_title = (
+    f"🚨 アラート一覧 — 安全在庫割れ/在庫ZERO部材（期間: {breach_period} / "
+    f"ZERO {n_zero}件 + UNDER {n_under}件）"
+    if not breach_df.empty
+    else "🚨 アラート一覧 — 直近6ヶ月に安全在庫割れ/在庫ZERO は0件"
+)
+
+with st.expander(alert_title, expanded=False):
+    st.caption(
+        f"📅 **集計対象期間**: {breach_period} の月末予測在庫が基準値を下回る 部材×月 の一覧。"
+        "1部材が3ヶ月連続でZEROであれば3行表示されます。"
+        "（件数が多い場合: データがDatabricksに未反映の可能性あり。新CSVをアップロードしてPipeline再実行してください）"
+    )
+    if breach_df.empty:
+        st.success("✅ 直近6ヶ月以内に安全在庫割れ/在庫切れ予測の部材はありません。")
+    else:
+        show_cols = [
+            ("item_code",        "品番"),
+            ("product_name",     "部材名"),
+            ("breach_type",      "状態"),
+            ("breach_date",      "発生月"),
+            ("projected_stock",  "予測在庫"),
+            ("min_qty",          "安全在庫"),
+            ("first_breach",     "初回発生月"),
+        ]
+        cols_present = [(k, v) for k, v in show_cols if k in breach_df.columns]
+        table = breach_df[[k for k, _ in cols_present]].rename(columns=dict(cols_present))
+        st.dataframe(table, hide_index=True, use_container_width=True, height=360)
