@@ -178,41 +178,125 @@ with lt_tab1:
     if filtered.empty:
         st.info("条件に該当する部材がありません。フィルターを調整してください。")
     else:
-        show_cols = [
-            ("item_code",       "品番"),
-            ("item_name",       "部材名"),
-            ("manufacturer_name", "メーカー"),
-            ("latest_lt_weeks", "現在LT(週)"),
-            ("lt_n1_weeks",     "1ヶ月前(週)"),
-            ("trend_arrow_n1",  "vs1M"),
-            ("lt_n3_weeks",     "3ヶ月前(週)"),
-            ("trend_arrow_n3",  "vs3M"),
-            ("lt_n6_weeks",     "6ヶ月前(週)"),
-            ("trend_arrow_n6",  "vs6M"),
-            ("lt_band",         "LTバンド"),
-            ("remark",          "コメント"),
-        ]
-        cols_present = [(k, v) for k, v in show_cols if k in filtered.columns]
-        table = filtered[[k for k, _ in cols_present]].rename(columns=dict(cols_present))
-        st.dataframe(table, hide_index=True, use_container_width=True, height=400)
+        # React #185対策: st.dataframe を回避し HTMLテーブルで描画
+        ft = filtered.copy()
+        for c in ["item_code","item_name","manufacturer_name","lt_band","remark",
+                  "trend_arrow_n1","trend_arrow_n3","trend_arrow_n6"]:
+            if c in ft.columns:
+                ft[c] = ft[c].fillna("").astype(str)
+        for c in ["latest_lt_weeks","lt_n1_weeks","lt_n3_weeks","lt_n6_weeks"]:
+            if c in ft.columns:
+                ft[c] = pd.to_numeric(ft[c], errors="coerce").fillna(0).astype(int)
+
+        MAX_ROWS = 100
+        total = len(ft)
+        if total > MAX_ROWS:
+            ft = ft.head(MAX_ROWS)
+            st.caption(f"⚠️ 全{total}品目中、上位 {MAX_ROWS} 品目を表示。フィルターで絞り込み可能。")
+
+        # 矢印に色付け関数
+        def arrow_html(s):
+            if s == "↑": return '<span style="color:#dc2626;font-weight:700;">↑</span>'
+            if s == "↓": return '<span style="color:#059669;font-weight:700;">↓</span>'
+            if s == "→": return '<span style="color:#94a3b8;">→</span>'
+            return s or ""
+
+        header_html = (
+            '<thead><tr style="background:#f1f5f9;text-align:left;font-size:12px;">'
+            '<th style="padding:8px;">品番</th>'
+            '<th style="padding:8px;">部材名</th>'
+            '<th style="padding:8px;">メーカー</th>'
+            '<th style="padding:8px;text-align:right;">現在LT</th>'
+            '<th style="padding:8px;text-align:right;">1M前</th>'
+            '<th style="padding:8px;text-align:center;">vs1M</th>'
+            '<th style="padding:8px;text-align:right;">3M前</th>'
+            '<th style="padding:8px;text-align:center;">vs3M</th>'
+            '<th style="padding:8px;text-align:right;">6M前</th>'
+            '<th style="padding:8px;text-align:center;">vs6M</th>'
+            '<th style="padding:8px;">LTバンド</th>'
+            '</tr></thead>'
+        )
+        rows_html = []
+        for _, r in ft.iterrows():
+            rows_html.append(
+                '<tr style="border-bottom:1px solid #e2e8f0;font-size:12px;">'
+                f'<td style="padding:8px;">{r.get("item_code","")}</td>'
+                f'<td style="padding:8px;">{r.get("item_name","")}</td>'
+                f'<td style="padding:8px;">{r.get("manufacturer_name","")}</td>'
+                f'<td style="padding:8px;text-align:right;">{r.get("latest_lt_weeks",0)}週</td>'
+                f'<td style="padding:8px;text-align:right;">{r.get("lt_n1_weeks",0)}</td>'
+                f'<td style="padding:8px;text-align:center;">{arrow_html(r.get("trend_arrow_n1",""))}</td>'
+                f'<td style="padding:8px;text-align:right;">{r.get("lt_n3_weeks",0)}</td>'
+                f'<td style="padding:8px;text-align:center;">{arrow_html(r.get("trend_arrow_n3",""))}</td>'
+                f'<td style="padding:8px;text-align:right;">{r.get("lt_n6_weeks",0)}</td>'
+                f'<td style="padding:8px;text-align:center;">{arrow_html(r.get("trend_arrow_n6",""))}</td>'
+                f'<td style="padding:8px;">{r.get("lt_band","")}</td>'
+                '</tr>'
+            )
+        st.markdown(
+            '<div style="max-height:420px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;">'
+            '<table style="width:100%;border-collapse:collapse;">'
+            f'{header_html}<tbody>{"".join(rows_html)}</tbody></table></div>',
+            unsafe_allow_html=True,
+        )
 
 with lt_tab2:
     if escal.empty:
         st.success("✅ LT延長中の部材はありません。")
     else:
-        show_cols = [
-            ("item_code",       "品番"),
-            ("item_name",       "部材名"),
-            ("latest_lt_weeks", "現在LT(週)"),
-            ("lt_n3_weeks",     "3ヶ月前(週)"),
-            ("delta_vs_n3",     "vs3M差分"),
-            ("lt_n6_weeks",     "6ヶ月前(週)"),
-            ("delta_vs_n6",     "vs6M差分"),
-            ("escalation_reason", "理由"),
-        ]
-        cols_present = [(k, v) for k, v in show_cols if k in escal.columns]
-        e_show = escal[[k for k, _ in cols_present]].rename(columns=dict(cols_present))
-        st.dataframe(e_show, hide_index=True, use_container_width=True, height=360)
+        # React #185対策: HTMLテーブル化
+        es = escal.copy()
+        for c in ["item_code","item_name","escalation_reason"]:
+            if c in es.columns:
+                es[c] = es[c].fillna("").astype(str)
+        for c in ["latest_lt_weeks","lt_n3_weeks","delta_vs_n3","lt_n6_weeks","delta_vs_n6"]:
+            if c in es.columns:
+                es[c] = pd.to_numeric(es[c], errors="coerce").fillna(0).astype(int)
+
+        def delta_html(v):
+            try:
+                v = int(v)
+                if v > 0:
+                    return f'<span style="color:#dc2626;font-weight:600;">+{v}</span>'
+                elif v < 0:
+                    return f'<span style="color:#059669;font-weight:600;">{v}</span>'
+                else:
+                    return '<span style="color:#94a3b8;">0</span>'
+            except Exception:
+                return '0'
+
+        header_html = (
+            '<thead><tr style="background:#f1f5f9;text-align:left;font-size:12px;">'
+            '<th style="padding:8px;">品番</th>'
+            '<th style="padding:8px;">部材名</th>'
+            '<th style="padding:8px;text-align:right;">現在LT</th>'
+            '<th style="padding:8px;text-align:right;">3M前</th>'
+            '<th style="padding:8px;text-align:center;">vs3M差分</th>'
+            '<th style="padding:8px;text-align:right;">6M前</th>'
+            '<th style="padding:8px;text-align:center;">vs6M差分</th>'
+            '<th style="padding:8px;">理由</th>'
+            '</tr></thead>'
+        )
+        rows_html = []
+        for _, r in es.iterrows():
+            rows_html.append(
+                '<tr style="border-bottom:1px solid #e2e8f0;font-size:12px;">'
+                f'<td style="padding:8px;">{r.get("item_code","")}</td>'
+                f'<td style="padding:8px;">{r.get("item_name","")}</td>'
+                f'<td style="padding:8px;text-align:right;">{r.get("latest_lt_weeks",0)}週</td>'
+                f'<td style="padding:8px;text-align:right;">{r.get("lt_n3_weeks",0)}</td>'
+                f'<td style="padding:8px;text-align:center;">{delta_html(r.get("delta_vs_n3",0))}</td>'
+                f'<td style="padding:8px;text-align:right;">{r.get("lt_n6_weeks",0)}</td>'
+                f'<td style="padding:8px;text-align:center;">{delta_html(r.get("delta_vs_n6",0))}</td>'
+                f'<td style="padding:8px;">{r.get("escalation_reason","")}</td>'
+                '</tr>'
+            )
+        st.markdown(
+            '<div style="max-height:380px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;">'
+            '<table style="width:100%;border-collapse:collapse;">'
+            f'{header_html}<tbody>{"".join(rows_html)}</tbody></table></div>',
+            unsafe_allow_html=True,
+        )
         st.caption(f"💡 上記 {len(escal)} 品目は新規発注のリードタイム見積もりを再評価してください。")
 
 with lt_tab3:
